@@ -1,0 +1,55 @@
+{
+  description = "Development environment for mailarchive";
+
+  inputs = {
+    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = {
+    self,
+    flake-utils,
+    nixpkgs,
+  }: flake-utils.lib.eachDefaultSystem (system: let
+    pkgs = import nixpkgs { inherit system; };
+  in {
+    devShells.default = pkgs.mkShell {
+      packages = with pkgs; [
+        # Go backend (server + CLI)
+        go
+        gopls
+        gotools          # goimports, stringer, ...
+        golangci-lint
+        delve
+
+        # SvelteKit frontend
+        nodejs_22
+        pnpm
+
+        # Misc
+        just
+      ];
+
+      # Keep Go's module cache and build cache inside the project so a
+      # fresh clone or a CI runner does not pollute $HOME.
+      shellHook = ''
+        export GOPATH="$PWD/.go"
+        export GOMODCACHE="$GOPATH/pkg/mod"
+        export GOCACHE="$GOPATH/cache"
+        export PATH="$GOPATH/bin:$PATH"
+
+        # Load project env files: .env for shared vars (checked in),
+        # .env.local for private overrides (gitignored).
+        for f in .env .env.local; do
+          if [ -f "$f" ]; then
+            set -a
+            . "$f"
+            set +a
+          fi
+        done
+      '';
+    };
+
+    formatter = pkgs.nixfmt-rfc-style;
+  });
+}

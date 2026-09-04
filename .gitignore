@@ -1,0 +1,22 @@
+# Nix / direnv
+.direnv/
+result
+
+# Go (project-local caches set by the flake shellHook)
+.go/
+/mailarchive
+/bin/
+
+# Node
+node_modules/
+web/build/
+web/.svelte-kit/
+
+# Env
+.env.local
+*.local
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
