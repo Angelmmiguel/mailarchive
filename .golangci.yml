@@ -1,0 +1,16 @@
+# Defaults (errcheck, govet, ineffassign, staticcheck, unused) plus the checks
+# that matter for a server holding other people's ciphertext.
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+  exclusions:
+    rules:
+      # G304 flags reads whose path comes from a variable. Every such path here
+      # is built from the operator's --data flag, never from a request; ids
+      # coming from the network go through store.ValidID first.
+      - linters: [gosec]
+        text: "G304"

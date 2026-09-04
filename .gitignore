@@ -7,9 +7,13 @@ result
 /mailarchive
 /bin/
 
+# Local archive written by `just serve`
+/data/
+
 # Node
 node_modules/
-web/build/
+web/build/*
+!web/build/.gitkeep
 web/.svelte-kit/
 
 # Env

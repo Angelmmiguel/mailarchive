@@ -39,9 +39,23 @@ its metadata and search terms, and uploads them. On reading, it downloads the
 encrypted index once, caches it encrypted on the device, and searches it in
 memory. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
+## Development
+
+The toolchain is a Nix flake. Enter it with `nix develop` (or direnv), then:
+
+```bash
+just test    # go test -race ./...
+just lint    # go vet + golangci-lint
+just serve   # run the server against ./data
+```
+
+The Go server serves the API and, once built, the SvelteKit app from a single
+binary. During development the Vite dev server proxies `/api` to it.
+
 ## Status
 
-Early design phase. Nothing runs yet.
+Early. The Go server and its test suite are in place; the web app is not
+started yet.
 
 ## License
 

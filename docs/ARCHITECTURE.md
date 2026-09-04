@@ -49,6 +49,11 @@ segments/<seg>/terms/<shard>  inverted-index shards for full-text search
 blobs/<id>                    raw .eml or message view
 ```
 
+This is the client's logical view. On the server there is exactly one flat
+namespace of write-once blobs plus the manifest: a segment index and a term
+shard are blobs like any other, and the manifest is what says which blob plays
+which role. Keeping the server this ignorant is what makes it small.
+
 ### Blob kinds
 
 Each message produces two blobs:
@@ -114,8 +119,10 @@ passphrase ──Argon2id, separate salt──► auth key           ├─► i
   to store offline. Losing both passphrase and recovery key loses the archive.
   There is no server-side reset by design.
 - **Auth key** is derived from the same passphrase with a different salt and
-  domain tag. The server stores only a hash of it. One passphrase, and the
-  server still never learns the encryption keys.
+  domain tag, 32 bytes sent to the server as standard base64. The server
+  stores only its SHA-256 and compares in constant time; a slow hash would add
+  nothing on top of an Argon2id output with 256 bits of entropy. One
+  passphrase, and the server still never learns the encryption keys.
 - **Blob encryption** is XChaCha20-Poly1305 with a random nonce per blob. The
   blob id is passed as additional authenticated data so the server cannot swap
   one blob for another. Segment indexes, term shards and the manifest are
@@ -178,21 +185,44 @@ instant.
 
 ## Server API
 
-Deliberately small. All routes except the SPA and login require a session.
+Deliberately small. Every route except health, setup and login requires a
+session. Errors are JSON `{"error":"<code>"}` with a stable code and no detail.
 
 ```
+GET    /api/health                    liveness and whether the archive is set up
+POST   /api/setup                     auth key → creates the single account
 POST   /api/login                     auth key → session cookie
+POST   /api/logout
 GET    /api/manifest                  returns ciphertext + ETag
-PUT    /api/manifest                  If-Match required
+PUT    /api/manifest                  If-Match required once a manifest exists (428/412)
 HEAD   /api/blobs/<id>                existence check
 GET    /api/blobs/<id>
-PUT    /api/blobs/<id>                write-once; 409 if exists with different content
+PUT    /api/blobs/<id>                write-once; 409 if the id exists
 POST   /api/blobs/exists              batch existence check, list of ids
 GET    /api/blobs                     listing, for garbage collection
 ```
 
-Storage is a directory on the NAS filesystem, one file per blob, so a backup
-is a plain copy.
+- **Setup.** While the server has no credentials, health reports it and the
+  web app shows the create-account screen. The first `POST /api/setup` wins,
+  becomes the only account, and the route is refused forever after. There is
+  no setup token: an empty archive belongs to whoever reaches it first, which
+  on a private network is the operator.
+- **Blob ids** are 64 lowercase hex characters and are validated before any
+  path is built. Everything else is rejected, which is the path-traversal
+  boundary of the server.
+- **Write-once is unconditional.** A repeated id is a 409 whatever the body,
+  because random nonces mean two encryptions of the same message never match
+  byte for byte. The client treats 409 as "already there".
+- **Sessions** are random tokens in an HttpOnly, SameSite=Strict cookie,
+  stored server-side only as hashes, in memory, with a 24 h idle timeout and
+  a 7 day absolute lifetime. A restart logs everyone out.
+- **Abuse limits.** Login and setup share a per-address rate limit. Blob and
+  manifest bodies are capped. State-changing requests must carry a
+  same-origin `Sec-Fetch-Site` or a matching `Origin`.
+
+Storage is a directory on the NAS filesystem, one file per blob under
+`blobs/<id[:2]>/<id>`, written to a temp file, fsynced and hard-linked into
+place so a crash cannot leave a partial blob. A backup is a plain copy.
 
 ## Out of scope for v1
 
