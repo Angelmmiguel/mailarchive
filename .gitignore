@@ -1,6 +1,6 @@
 # Nix / direnv
-.direnv/
 result
+.direnv/
 
 # Go (project-local caches set by the flake shellHook)
 .go/
@@ -11,10 +11,11 @@ result
 /data/
 
 # Node
-node_modules/
+web/node_modules/
+web/.svelte-kit/
 web/build/*
 !web/build/.gitkeep
-web/.svelte-kit/
+web/vite.config.ts.timestamp-*
 
 # Env
 .env.local

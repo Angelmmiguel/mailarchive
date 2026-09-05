@@ -1,0 +1,9 @@
+# Package Managers
+pnpm-lock.yaml
+
+# Generated
+/.svelte-kit/
+/build/
+
+# Miscellaneous
+/static/

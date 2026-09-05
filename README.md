@@ -44,18 +44,25 @@ memory. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 The toolchain is a Nix flake. Enter it with `nix develop` (or direnv), then:
 
 ```bash
-just test    # go test -race ./...
-just lint    # go vet + golangci-lint
-just serve   # run the server against ./data
+just web-install   # pnpm install, once
+just dev           # Go server on :8080 and the Vite dev server on :5173
+just test          # go test -race and vitest
+just lint          # go vet, golangci-lint, svelte-check, eslint, prettier
+just build         # build the web app and a Go binary that embeds it
 ```
 
-The Go server serves the API and, once built, the SvelteKit app from a single
-binary. During development the Vite dev server proxies `/api` to it.
+Open http://localhost:5173 during development. Vite proxies `/api` to the Go
+server, so the browser sees a single origin, exactly as in production where
+the Go binary serves both. `just build` writes `bin/mailarchive`.
+
+If port 8080 is taken, put `MAILARCHIVE_ADDR=:8090` (any free port) in a
+`.env.local` file at the repo root. The Nix shell loads it, and both the Go
+server and the Vite proxy read the same variable.
 
 ## Status
 
-Early. The Go server and its test suite are in place; the web app is not
-started yet.
+Early. The Go server, the SvelteKit scaffolding and their test suites are in
+place. No archive functionality exists yet.
 
 ## License
 

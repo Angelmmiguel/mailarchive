@@ -10,19 +10,6 @@ import (
 	"time"
 )
 
-// contentSecurityPolicy is the policy served with the web app. The app is
-// self-contained: no third-party origin may be contacted, framed or loaded.
-// Inline styles are allowed because the SPA's build inlines critical CSS;
-// inline scripts are not.
-const contentSecurityPolicy = "default-src 'self'; " +
-	"img-src 'self' data: blob:; " +
-	"style-src 'self' 'unsafe-inline'; " +
-	"connect-src 'self'; " +
-	"worker-src 'self' blob:; " +
-	"frame-ancestors 'none'; " +
-	"base-uri 'none'; " +
-	"form-action 'self'"
-
 // requireSession rejects requests without a live session cookie.
 func (s *Server) requireSession(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +23,10 @@ func (s *Server) requireSession(next http.HandlerFunc) http.Handler {
 }
 
 // securityHeaders sets the headers that apply to every response.
+//
+// The Content-Security-Policy is not among them: the web app authors its own
+// policy at build time, because only it knows the hashes of the scripts it
+// inlines, and the web package serves it with the app shell.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -46,8 +37,6 @@ func securityHeaders(next http.Handler) http.Handler {
 			// Ciphertext is cacheable in principle, but nothing about the
 			// archive should linger in a shared cache or on disk.
 			h.Set("Cache-Control", "no-store")
-		} else {
-			h.Set("Content-Security-Policy", contentSecurityPolicy)
 		}
 		next.ServeHTTP(w, r)
 	})

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -25,6 +26,23 @@ var build = func() fs.FS {
 
 const indexFile = "index.html"
 
+// defaultContentSecurityPolicy is the policy served when the shell carries no
+// policy of its own. It is deliberately stricter than what the app needs: no
+// inline script can run under it, so a build whose meta tag went missing fails
+// visibly instead of silently losing its protection.
+const defaultContentSecurityPolicy = "default-src 'self'; " +
+	"img-src 'self' data: blob:; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"connect-src 'self'; " +
+	"worker-src 'self' blob:; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'none'; " +
+	"form-action 'self'"
+
+// cspMeta matches the meta tag SvelteKit emits for a hash-mode policy. The tag
+// comes from the build, never from user input.
+var cspMeta = regexp.MustCompile(`(?i)<meta[^>]+http-equiv="content-security-policy"[^>]+content="([^"]*)"`)
+
 // Handler serves the embedded web app: real files as they are, every other
 // path as index.html so client-side routing works on a cold load.
 //
@@ -35,8 +53,9 @@ func Handler() http.Handler { return handler(build) }
 // handler is Handler over an arbitrary file system, so the routing and caching
 // rules can be tested without a real build.
 func handler(fsys fs.FS) http.Handler {
-	_, err := fs.Stat(fsys, indexFile)
+	index, err := fs.ReadFile(fsys, indexFile)
 	built := err == nil
+	csp := contentSecurityPolicy(index)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The API is routed before this handler; anything left under /api is a
@@ -52,12 +71,12 @@ func handler(fsys fs.FS) http.Handler {
 
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 		if name == "" || !fs.ValidPath(name) {
-			serveIndex(w, r, fsys)
+			serveIndex(w, r, fsys, csp)
 			return
 		}
 		info, err := fs.Stat(fsys, name)
 		if err != nil || info.IsDir() {
-			serveIndex(w, r, fsys)
+			serveIndex(w, r, fsys, csp)
 			return
 		}
 		// Hashed asset paths never change contents, so they can be cached
@@ -71,8 +90,23 @@ func handler(fsys fs.FS) http.Handler {
 	})
 }
 
-func serveIndex(w http.ResponseWriter, r *http.Request, fsys fs.FS) {
+func serveIndex(w http.ResponseWriter, r *http.Request, fsys fs.FS, csp string) {
+	h := w.Header()
 	// The shell embeds the app's entry points and must never be served stale.
-	w.Header().Set("Cache-Control", "no-store")
+	h.Set("Cache-Control", "no-store")
+	// Only the document needs a policy; the assets it pulls in are governed by
+	// the document that loaded them.
+	h.Set("Content-Security-Policy", csp)
 	http.ServeFileFS(w, r, fsys, indexFile)
+}
+
+// contentSecurityPolicy returns the policy for the app shell. SvelteKit writes
+// the policy it authored into index.html as a meta tag, which cannot express
+// frame-ancestors, so that directive is appended here.
+func contentSecurityPolicy(index []byte) string {
+	m := cspMeta.FindSubmatch(index)
+	if m == nil {
+		return defaultContentSecurityPolicy
+	}
+	return string(m[1]) + "; frame-ancestors 'none'"
 }

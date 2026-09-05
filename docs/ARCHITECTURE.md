@@ -36,6 +36,14 @@ ever stores ciphertext. Reading, searching and importing all happen client-side.
 The server has no knowledge of what a "message" is. Its whole API is a
 key-value store of encrypted blobs plus one mutable, versioned manifest.
 
+The web app is a pure SPA built with adapter-static into `web/build`, which
+the Go binary embeds. Its Content-Security-Policy is authored in
+`svelte.config.js`, where the build can hash its own inline bootstrap script;
+the Go handler reads the resulting meta tag out of `index.html` and delivers
+it as a header, adding `frame-ancestors 'none'`. In development Vite serves
+the app and proxies `/api` to the Go server, so the browser always talks to a
+single origin and the same-origin checks behave as in production.
+
 ## Storage layout
 
 All values are encrypted with the archive keys described below. Names are

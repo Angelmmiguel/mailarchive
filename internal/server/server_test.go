@@ -550,17 +550,13 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("api %s = %q, want %q", key, got, want)
 		}
 	}
+	// The Content-Security-Policy belongs to the web app, which authors it at
+	// build time and serves it with the shell; see the web package.
 	if csp := api.header.Get("Content-Security-Policy"); csp != "" {
 		t.Errorf("api Content-Security-Policy = %q, want none", csp)
 	}
 
 	ui := h.do(http.MethodGet, "/", nil)
-	csp := ui.header.Get("Content-Security-Policy")
-	for _, directive := range []string{"default-src 'self'", "frame-ancestors 'none'", "base-uri 'none'"} {
-		if !strings.Contains(csp, directive) {
-			t.Errorf("Content-Security-Policy %q is missing %q", csp, directive)
-		}
-	}
 	if got := ui.header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("ui X-Content-Type-Options = %q, want nosniff", got)
 	}

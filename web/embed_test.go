@@ -1,12 +1,17 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+// metaCSP is the policy SvelteKit writes into index.html in hash mode, cut
+// down to the parts the server cares about.
+const metaCSP = "default-src 'self'; script-src 'self' 'sha256-AAAA'"
 
 // builtFS stands in for a compiled SvelteKit build.
 var builtFS = fstest.MapFS{
@@ -59,6 +64,41 @@ func TestHandlerCachesHashedAssetsForever(t *testing.T) {
 	}
 }
 
+// The policy is authored in svelte.config.js and lands in index.html as a meta
+// tag. The server hands it back as a header, which is the only place
+// frame-ancestors can be expressed.
+func TestIndexServesThePolicyTheBuildAuthored(t *testing.T) {
+	h := handler(fstest.MapFS{
+		"index.html": {Data: []byte(
+			`<!doctype html><meta http-equiv="content-security-policy" content="` + metaCSP + `">shell`,
+		)},
+	})
+
+	rec := get(t, h, "/messages/1")
+	want := metaCSP + "; frame-ancestors 'none'"
+	if got := rec.Header().Get("Content-Security-Policy"); got != want {
+		t.Errorf("Content-Security-Policy = %q, want %q", got, want)
+	}
+}
+
+// A shell without a meta tag is a hand-written index or a build that lost its
+// policy; either way the app is served under the strict default.
+func TestIndexFallsBackToTheDefaultPolicy(t *testing.T) {
+	rec := get(t, handler(builtFS), "/")
+	if got := rec.Header().Get("Content-Security-Policy"); got != defaultContentSecurityPolicy {
+		t.Errorf("Content-Security-Policy = %q, want the default", got)
+	}
+}
+
+// Assets are not documents: the policy of the page that loaded them applies.
+func TestAssetsCarryNoPolicy(t *testing.T) {
+	for _, path := range []string{"/_app/immutable/x.js", "/favicon.png"} {
+		if got := get(t, handler(builtFS), path).Header().Get("Content-Security-Policy"); got != "" {
+			t.Errorf("GET %s Content-Security-Policy = %q, want none", path, got)
+		}
+	}
+}
+
 func TestHandlerWithoutAnIndex(t *testing.T) {
 	h := handler(fstest.MapFS{"favicon.png": {Data: []byte("icon")}})
 
@@ -85,19 +125,29 @@ func TestHandlerNeverServesAPIPathsFromTheFS(t *testing.T) {
 }
 
 // The repository ships an empty web/build, so the handler must say so instead
-// of pretending the app routes exist. Once the SPA is built, the same handler
-// serves it.
-func TestHandlerWithoutABuild(t *testing.T) {
+// of pretending the app routes exist. Once `just web-build` has run, the same
+// handler serves the real app, and this test follows whichever tree it finds.
+func TestHandlerAgainstTheEmbeddedBuild(t *testing.T) {
 	h := Handler()
+	_, err := fs.Stat(build, indexFile)
+	built := err == nil
 
-	for _, path := range []string{"/", "/messages/1", "/_app/immutable/app.js"} {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Errorf("GET %s = %d, want 503", path, rec.Code)
+	for _, path := range []string{"/", "/messages/1"} {
+		rec := get(t, h, path)
+		if !built {
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Errorf("GET %s = %d, want 503", path, rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "UI not built") {
+				t.Errorf("GET %s body = %q", path, rec.Body.String())
+			}
+			continue
 		}
-		if !strings.Contains(rec.Body.String(), "UI not built") {
-			t.Errorf("GET %s body = %q", path, rec.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, rec.Code)
+		}
+		if csp := rec.Header().Get("Content-Security-Policy"); csp == "" {
+			t.Errorf("GET %s served no Content-Security-Policy", path)
 		}
 	}
 }

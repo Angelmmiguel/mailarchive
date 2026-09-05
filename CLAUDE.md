@@ -14,21 +14,31 @@ those. Routine work does not need it.
   modules; `net/http`'s mux, `log/slog` and `crypto/*` cover everything the API
   needs, and a security-focused server should not carry dependencies in its
   request path. Revisit only if the API grows well past its current size.
-- **Frontend:** SvelteKit SPA compiled to static assets under `web/build`, which
-  the Go binary embeds and serves. In development Vite proxies `/api` to the Go
-  server, so there is no CORS.
+- **Frontend:** SvelteKit SPA in `web/`, compiled by adapter-static into
+  `web/build`, which the Go binary embeds and serves. In development Vite
+  proxies `/api` to the Go server, so there is no CORS. Svelte 5 only: runes
+  (`$state`, `$derived`, `$effect`, `$props`) everywhere, never the legacy
+  `export let` or `$:` syntax, and never `svelte/store`. Shared reactive state
+  lives in `.svelte.ts` modules under `src/lib/state`, exported as class
+  instances or objects whose properties are `$state`. The API client in
+  `src/lib/api` mirrors the Go routes one to one and knows nothing about
+  crypto. When unsure about Svelte 5 idioms, check https://svelte.dev/docs.
+  The Content-Security-Policy is authored in `svelte.config.js` and delivered
+  as a header by the Go handler, which reads it from the built `index.html`.
 - **Toolchain:** Nix flake. Run commands inside `nix develop` (or direnv).
 
 ## Commands
 
 ```
-just test    # go test -race ./...
-just lint    # go vet + golangci-lint
-just serve   # go run ./cmd/mailarchive serve --data ./data
+just test    # go test -race ./... and vitest
+just lint    # go vet, golangci-lint, svelte-check, eslint, prettier
+just dev     # Go server on :8080 and Vite on :5173 together
+just build   # pnpm build, then go build with the web app embedded
 ```
 
-All three must be clean before work is considered done, along with `gofmt -l .`
-printing nothing.
+`just test` and `just lint` must be clean before work is considered done,
+along with `gofmt -l .` printing nothing. Web-only variants exist as
+`web-install`, `web-dev`, `web-check`, `web-test` and `web-build`.
 
 ## Conventions
 
