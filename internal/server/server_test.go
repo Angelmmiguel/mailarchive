@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -32,11 +33,22 @@ func authKey(b byte) string {
 	return base64.StdEncoding.EncodeToString(key)
 }
 
+// recoveryKey is the recovery auth key loggedIn registers, far from the small
+// seeds tests use for passphrase keys and wrong keys.
+var recoveryKey = authKey(200)
+
+// defaultKDF is what loggedIn registers, already compact.
+const defaultKDF = `{"name":"argon2id","m":65536,"t":3,"p":1,"salt":"AAAA"}`
+
+// setupManifest is the manifest the setup helper stores.
+const setupManifest = "manifest-v0"
+
 type harness struct {
 	t       *testing.T
 	url     string
 	client  *http.Client
 	dataDir string
+	store   *store.FS
 }
 
 type options struct {
@@ -55,7 +67,10 @@ func newHarness(t *testing.T, opts ...func(*options)) *harness {
 				_, _ = io.WriteString(w, "<!doctype html>index")
 			}),
 		},
-		limiter: auth.NewRateLimiter(auth.DefaultLoginAttempts, auth.DefaultLoginWindow),
+		// Every client shares the loopback address and setup, login and rekey
+		// all spend attempts, so the production limit would trip in longer
+		// tests. The rate limit tests set their own.
+		limiter: auth.NewRateLimiter(100, auth.DefaultLoginWindow),
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -77,14 +92,26 @@ func newHarness(t *testing.T, opts ...func(*options)) *harness {
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)
 	}
-	return &harness{t: t, url: srv.URL, client: &http.Client{Jar: jar}, dataDir: dir}
+	return &harness{t: t, url: srv.URL, client: &http.Client{Jar: jar}, dataDir: dir, store: st}
 }
 
-// loggedIn returns a harness that has completed setup and holds a session.
+// newClient returns a second client of the same server, with its own cookie
+// jar and therefore its own session.
+func (h *harness) newClient() *harness {
+	h.t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		h.t.Fatalf("cookiejar: %v", err)
+	}
+	return &harness{t: h.t, url: h.url, client: &http.Client{Jar: jar}, dataDir: h.dataDir, store: h.store}
+}
+
+// loggedIn returns a harness that has completed setup with authKey(1) and
+// recoveryKey and holds a session opened with the passphrase key.
 func loggedIn(t *testing.T, opts ...func(*options)) *harness {
 	t.Helper()
 	h := newHarness(t, opts...)
-	h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
 	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
 	return h
 }
@@ -123,10 +150,75 @@ func (h *harness) postJSON(path string, body string, header ...string) response 
 		append([]string{"Content-Type", "application/json"}, header...)...)
 }
 
-func (h *harness) setup(key string) response {
+// setup registers both auth keys and the KDF parameters, with setupManifest
+// as the manifest. kdf is raw JSON, spliced into the body as is, so tests can
+// send malformed values.
+func (h *harness) setup(authKey, recoveryKey, kdf string) response {
 	h.t.Helper()
-	return h.postJSON("/api/setup", `{"auth_key":`+quote(key)+`}`)
+	return h.postJSON("/api/setup", `{"auth_key":`+quote(authKey)+`,"recovery_auth_key":`+quote(recoveryKey)+
+		`,"kdf":`+kdf+`,"manifest":`+quote(b64(setupManifest))+`}`)
 }
+
+// rekeyRequest is one POST /api/rekey body. Empty strings are left out of the
+// body, and kdf is spliced in as raw JSON. current is the credential the
+// caller proves possession of.
+type rekeyRequest struct {
+	current, authKey, recoveryKey, kdf, manifest, ifMatch string
+}
+
+func (h *harness) rekey(req rekeyRequest) response {
+	h.t.Helper()
+	fields := []string{}
+	if req.current != "" {
+		fields = append(fields, `"current_auth_key":`+quote(req.current))
+	}
+	if req.authKey != "" {
+		fields = append(fields, `"auth_key":`+quote(req.authKey))
+	}
+	if req.recoveryKey != "" {
+		fields = append(fields, `"recovery_auth_key":`+quote(req.recoveryKey))
+	}
+	if req.kdf != "" {
+		fields = append(fields, `"kdf":`+req.kdf)
+	}
+	fields = append(fields, `"manifest":`+quote(req.manifest))
+	if req.ifMatch != "" {
+		fields = append(fields, `"if_match":`+quote(req.ifMatch))
+	}
+	return h.postJSON("/api/rekey", "{"+strings.Join(fields, ",")+"}")
+}
+
+// putManifest replaces the manifest under its current ETag and returns the
+// new one.
+func (h *harness) putManifest(body string) string {
+	h.t.Helper()
+	var out struct {
+		ETag string `json:"etag"`
+	}
+	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader(body), "If-Match", h.manifestETag()), http.StatusOK).decode(h.t, &out)
+	if out.ETag == "" {
+		h.t.Fatal("empty etag after writing the manifest")
+	}
+	return out.ETag
+}
+
+// manifest reads the manifest back.
+func (h *harness) manifest() string {
+	h.t.Helper()
+	return string(h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK).body)
+}
+
+// manifestETag reads the current manifest's ETag.
+func (h *harness) manifestETag() string {
+	h.t.Helper()
+	etag := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK).header.Get("ETag")
+	if etag == "" {
+		h.t.Fatal("manifest served without an ETag")
+	}
+	return etag
+}
+
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
 func (h *harness) login(key string) response {
 	h.t.Helper()
@@ -179,7 +271,7 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("health = %+v, want ok and setup=false", health)
 	}
 
-	h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
 	h.mustStatus(h.do(http.MethodGet, "/api/health", nil), http.StatusOK).decode(t, &health)
 	if !health.Setup {
 		t.Fatal("health still reports the archive as not set up")
@@ -189,33 +281,28 @@ func TestHealth(t *testing.T) {
 func TestLifecycle(t *testing.T) {
 	h := loggedIn(t)
 
-	// No manifest yet.
-	h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusNotFound)
-
-	// Create it, then read it back with its ETag.
-	var created struct {
-		ETag string `json:"etag"`
-	}
-	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("manifest-v1")), http.StatusOK).decode(t, &created)
-	if created.ETag == "" {
-		t.Fatal("empty etag after creating the manifest")
-	}
+	// Setup stored the manifest; read it back with its ETag.
 	got := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK)
-	if string(got.body) != "manifest-v1" {
-		t.Fatalf("manifest = %q, want manifest-v1", got.body)
+	if string(got.body) != setupManifest {
+		t.Fatalf("manifest = %q, want %q", got.body, setupManifest)
 	}
-	if got.header.Get("ETag") != created.ETag {
-		t.Fatalf("ETag = %q, want %q", got.header.Get("ETag"), created.ETag)
+	created := got.header.Get("ETag")
+	if created == "" {
+		t.Fatal("manifest served without an ETag")
 	}
 
 	// Update it under its ETag.
 	var updated struct {
 		ETag string `json:"etag"`
 	}
-	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("manifest-v2"),
-		"If-Match", created.ETag), http.StatusOK).decode(t, &updated)
-	if updated.ETag == created.ETag {
-		t.Fatal("etag did not change after the update")
+	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("manifest-v1"),
+		"If-Match", created), http.StatusOK).decode(t, &updated)
+	if updated.ETag == "" || updated.ETag == created {
+		t.Fatalf("etag after the update = %q, want a new one", updated.ETag)
+	}
+	got = h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK)
+	if string(got.body) != "manifest-v1" || got.header.Get("ETag") != updated.ETag {
+		t.Fatalf("manifest = %q with ETag %q, want manifest-v1 with %q", got.body, got.header.Get("ETag"), updated.ETag)
 	}
 
 	// Blobs: put, get, head.
@@ -267,16 +354,24 @@ func TestLifecycle(t *testing.T) {
 func TestSetupErrors(t *testing.T) {
 	h := newHarness(t)
 
-	if got := h.mustStatus(h.setup("not-base64!"), http.StatusBadRequest).errorCode(t); got != "invalid_auth_key" {
+	if got := h.mustStatus(h.setup("not-base64!", recoveryKey, defaultKDF), http.StatusBadRequest).errorCode(t); got != "invalid_auth_key" {
 		t.Errorf("error = %q, want invalid_auth_key", got)
 	}
-	h.mustStatus(h.setup(base64.StdEncoding.EncodeToString([]byte("short"))), http.StatusBadRequest)
+	h.mustStatus(h.setup(base64.StdEncoding.EncodeToString([]byte("short")), recoveryKey, defaultKDF), http.StatusBadRequest)
 	h.mustStatus(h.postJSON("/api/setup", `{"auth_key":"x"`), http.StatusBadRequest)
 	h.mustStatus(h.postJSON("/api/setup", `{"unknown":"x"}`), http.StatusBadRequest)
 
+	// The recovery key is mandatory and validated the same way.
+	if got := h.mustStatus(h.postJSON("/api/setup",
+		`{"auth_key":`+quote(authKey(1))+`,"kdf":`+defaultKDF+`,"manifest":`+quote(b64(setupManifest))+`}`),
+		http.StatusBadRequest).errorCode(t); got != "invalid_auth_key" {
+		t.Errorf("missing recovery key: error = %q, want invalid_auth_key", got)
+	}
+	h.mustStatus(h.setup(authKey(1), "not-base64!", defaultKDF), http.StatusBadRequest)
+
 	// A rejected setup leaves the archive claimable; the first account wins.
-	h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
-	if got := h.mustStatus(h.setup(authKey(2)), http.StatusConflict).errorCode(t); got != "already_setup" {
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
+	if got := h.mustStatus(h.setup(authKey(2), authKey(3), defaultKDF), http.StatusConflict).errorCode(t); got != "already_setup" {
 		t.Errorf("error = %q, want already_setup", got)
 	}
 	// The first key is the one that works.
@@ -290,7 +385,7 @@ func TestLoginErrors(t *testing.T) {
 		t.Errorf("error = %q, want not_setup", got)
 	}
 
-	h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
 	if got := h.mustStatus(h.login(authKey(9)), http.StatusUnauthorized).errorCode(t); got != "unauthorized" {
 		t.Errorf("error = %q, want unauthorized", got)
 	}
@@ -302,7 +397,7 @@ func TestLoginRateLimit(t *testing.T) {
 	h := newHarness(t, func(o *options) {
 		o.limiter = auth.NewRateLimiter(4, time.Minute)
 	})
-	h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
 
 	for range 3 {
 		h.mustStatus(h.login(authKey(9)), http.StatusUnauthorized)
@@ -315,23 +410,82 @@ func TestLoginRateLimit(t *testing.T) {
 }
 
 func TestSetupRateLimit(t *testing.T) {
-	h := newHarness(t, func(o *options) {
-		o.limiter = auth.NewRateLimiter(3, time.Minute)
-	})
+	limiter := auth.NewRateLimiter(1, time.Minute)
+	h := newHarness(t, func(o *options) { o.limiter = limiter })
 
-	for range 3 {
-		h.mustStatus(h.setup("not-base64!"), http.StatusBadRequest)
-	}
-	// A valid key is refused too: the limit counts attempts, not failures.
-	if got := h.mustStatus(h.setup(authKey(1)), http.StatusTooManyRequests).errorCode(t); got != "rate_limited" {
+	// Only a setup that passes validation reaches the limiter, and a valid
+	// one claims the archive, so the single attempt is spent directly for the
+	// loopback address the test client arrives from.
+	limiter.Allow("127.0.0.1")
+	if got := h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusTooManyRequests).errorCode(t); got != "rate_limited" {
 		t.Errorf("error = %q, want rate_limited", got)
+	}
+	h.mustNotSetup()
+}
+
+// mustNotSetup asserts that no setup attempt claimed the archive: neither the
+// credentials nor a manifest exist.
+func (h *harness) mustNotSetup() {
+	h.t.Helper()
+	for _, name := range []string{"auth.json", "manifest"} {
+		if _, err := os.Stat(filepath.Join(h.dataDir, name)); err == nil {
+			h.t.Fatalf("%s exists after a rejected setup", name)
+		}
+	}
+}
+
+func TestSetupManifest(t *testing.T) {
+	h := newHarness(t, func(o *options) { o.cfg.MaxManifestBytes = 16 })
+	fields := `"auth_key":` + quote(authKey(1)) + `,"recovery_auth_key":` + quote(recoveryKey) + `,"kdf":` + defaultKDF
+
+	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`}`), http.StatusBadRequest).errorCode(t); got != "bad_request" {
+		t.Errorf("missing manifest: error = %q, want bad_request", got)
+	}
+	h.mustNotSetup()
+	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":"not base64!"}`), http.StatusBadRequest).errorCode(t); got != "bad_request" {
+		t.Errorf("bad manifest: error = %q, want bad_request", got)
+	}
+	// Over the limit, whether it fits the body limit or not.
+	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(strings.Repeat("x", 17)))+`}`),
+		http.StatusRequestEntityTooLarge).errorCode(t); got != "too_large" {
+		t.Errorf("large manifest: error = %q, want too_large", got)
+	}
+	h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(strings.Repeat("x", 64<<10)))+`}`),
+		http.StatusRequestEntityTooLarge)
+	h.mustNotSetup()
+
+	// Exactly at the limit goes through, and login reads it back verbatim.
+	want := strings.Repeat("y", 16)
+	h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(want))+`}`), http.StatusCreated)
+	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
+	got := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK)
+	if string(got.body) != want {
+		t.Errorf("manifest = %q, want %q", got.body, want)
+	}
+	if got.header.Get("ETag") == "" {
+		t.Error("manifest served without an ETag")
+	}
+}
+
+// A setup that crashed between writing the manifest and the credentials
+// leaves an orphan manifest; the next setup replaces it.
+func TestSetupOverwritesOrphanManifest(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.store.PutManifest(context.Background(), []byte("orphan"), ""); err != nil {
+		t.Fatalf("plant orphan manifest: %v", err)
+	}
+
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
+	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
+	if got := h.manifest(); got != setupManifest {
+		t.Errorf("manifest = %q, want %q", got, setupManifest)
 	}
 }
 
 func TestSessionCookieAttributes(t *testing.T) {
 	for _, secure := range []bool{false, true} {
 		h := newHarness(t, func(o *options) { o.cfg.Secure = secure })
-		h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
+		h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
 
 		req, err := http.NewRequest(http.MethodPost, h.url+"/api/login", strings.NewReader(`{"auth_key":`+quote(authKey(1))+`}`))
 		if err != nil {
@@ -362,7 +516,7 @@ func TestSessionCookieAttributes(t *testing.T) {
 
 func TestAuthenticationRequired(t *testing.T) {
 	h := newHarness(t)
-	h.mustStatus(h.setup(authKey(1)), http.StatusCreated)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
 
 	id := blobID("a")
 	for _, tc := range []struct{ method, path string }{
@@ -374,6 +528,9 @@ func TestAuthenticationRequired(t *testing.T) {
 		{http.MethodHead, "/api/blobs/" + id},
 		{http.MethodPut, "/api/blobs/" + id},
 		{http.MethodPost, "/api/logout"},
+		{http.MethodPost, "/api/rekey"},
+		{http.MethodGet, "/api/session/key"},
+		{http.MethodPut, "/api/session/key"},
 	} {
 		r := h.do(tc.method, tc.path, strings.NewReader("{}"))
 		if r.status != http.StatusUnauthorized {
@@ -390,11 +547,7 @@ func TestAuthenticationRequired(t *testing.T) {
 
 func TestManifestPreconditions(t *testing.T) {
 	h := loggedIn(t)
-
-	var created struct {
-		ETag string `json:"etag"`
-	}
-	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("v1")), http.StatusOK).decode(t, &created)
+	h.putManifest("v1")
 
 	got := h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("v2")), http.StatusPreconditionRequired)
 	if code := got.errorCode(t); code != "if_match_required" {
@@ -422,7 +575,21 @@ func TestManifestTooLarge(t *testing.T) {
 	if code := r.errorCode(t); code != "too_large" {
 		t.Errorf("error = %q, want too_large", code)
 	}
-	h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusNotFound)
+	if got := h.manifest(); got != setupManifest {
+		t.Errorf("manifest = %q, want %q", got, setupManifest)
+	}
+}
+
+// Setup always stores a manifest, so only its disappearance from disk makes
+// GET answer 404.
+func TestManifestMissing(t *testing.T) {
+	h := loggedIn(t)
+	if err := os.Remove(filepath.Join(h.dataDir, "manifest")); err != nil {
+		t.Fatalf("remove manifest: %v", err)
+	}
+	if got := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusNotFound).errorCode(t); got != "not_found" {
+		t.Errorf("error = %q, want not_found", got)
+	}
 }
 
 func TestBlobWriteOnce(t *testing.T) {
@@ -600,4 +767,371 @@ func TestUnknownAPIMethod(t *testing.T) {
 	if code := r.errorCode(t); code != "not_found" {
 		t.Errorf("error = %q, want not_found", code)
 	}
+}
+
+func TestKDF(t *testing.T) {
+	h := newHarness(t)
+
+	if got := h.mustStatus(h.do(http.MethodGet, "/api/kdf", nil), http.StatusConflict).errorCode(t); got != "not_setup" {
+		t.Errorf("error = %q, want not_setup", got)
+	}
+
+	// Stored compacted, served verbatim, without a session.
+	spaced := `{ "name": "argon2id", "m": 65536, "t": 3, "p": 1, "salt": "AAAA" }`
+	h.mustStatus(h.setup(authKey(1), recoveryKey, spaced), http.StatusCreated)
+	r := h.mustStatus(h.do(http.MethodGet, "/api/kdf", nil), http.StatusOK)
+	if string(r.body) != defaultKDF {
+		t.Errorf("kdf = %s, want %s", r.body, defaultKDF)
+	}
+	if ct := r.header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	if r.header.Get("Cache-Control") != "no-store" {
+		t.Error("kdf is cacheable")
+	}
+
+	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
+	if body := h.mustStatus(h.do(http.MethodGet, "/api/kdf", nil), http.StatusOK).body; string(body) != defaultKDF {
+		t.Errorf("kdf after login = %s, want %s", body, defaultKDF)
+	}
+}
+
+func TestSetupRejectsBadKDF(t *testing.T) {
+	h := newHarness(t)
+	for name, kdf := range map[string]string{
+		"missing":   "",
+		"string":    `"argon2id"`,
+		"null":      `null`,
+		"array":     `[1,2]`,
+		"too large": `{"salt":"` + strings.Repeat("A", auth.MaxKDFBytes) + `"}`,
+	} {
+		body := `{"auth_key":` + quote(authKey(1)) + `,"recovery_auth_key":` + quote(recoveryKey) + `,"manifest":` + quote(b64(setupManifest)) + `}`
+		if kdf != "" {
+			body = `{"auth_key":` + quote(authKey(1)) + `,"recovery_auth_key":` + quote(recoveryKey) + `,"kdf":` + kdf +
+				`,"manifest":` + quote(b64(setupManifest)) + `}`
+		}
+		r := h.mustStatus(h.postJSON("/api/setup", body), http.StatusBadRequest)
+		if got := r.errorCode(t); got != "invalid_kdf" {
+			t.Errorf("%s kdf: error = %q, want invalid_kdf", name, got)
+		}
+	}
+	// Invalid JSON inside the object fails to parse as a body at all.
+	h.mustStatus(h.setup(authKey(1), recoveryKey, `{"name":`), http.StatusBadRequest)
+
+	// Nothing above claimed the archive.
+	h.mustStatus(h.do(http.MethodGet, "/api/kdf", nil), http.StatusConflict)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
+}
+
+func TestLoginAcceptsEitherKey(t *testing.T) {
+	h := newHarness(t)
+	h.mustStatus(h.setup(authKey(1), recoveryKey, defaultKDF), http.StatusCreated)
+
+	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
+	h.mustStatus(h.do(http.MethodGet, "/api/blobs", nil), http.StatusOK)
+	h.mustStatus(h.do(http.MethodPost, "/api/logout", nil), http.StatusNoContent)
+
+	h.mustStatus(h.login(recoveryKey), http.StatusNoContent)
+	h.mustStatus(h.do(http.MethodGet, "/api/blobs", nil), http.StatusOK)
+	h.mustStatus(h.do(http.MethodPost, "/api/logout", nil), http.StatusNoContent)
+
+	h.mustStatus(h.login(authKey(3)), http.StatusUnauthorized)
+	h.mustStatus(h.do(http.MethodGet, "/api/blobs", nil), http.StatusUnauthorized)
+}
+
+func TestRekey(t *testing.T) {
+	h := loggedIn(t)
+	etag := h.putManifest("manifest-v1")
+
+	// New passphrase key.
+	var out struct {
+		ETag string `json:"etag"`
+	}
+	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("manifest-v2"), ifMatch: etag}), http.StatusOK)
+	r.decode(t, &out)
+	if out.ETag == "" || out.ETag == etag {
+		t.Fatalf("etag after rekey = %q, want a new one", out.ETag)
+	}
+	if r.header.Get("ETag") != out.ETag {
+		t.Errorf("ETag header = %q, want %q", r.header.Get("ETag"), out.ETag)
+	}
+	if got := h.manifest(); got != "manifest-v2" {
+		t.Errorf("manifest = %q, want manifest-v2", got)
+	}
+	// The session that rekeyed stays alive.
+	h.mustStatus(h.do(http.MethodGet, "/api/blobs", nil), http.StatusOK)
+
+	other := h.newClient()
+	other.mustStatus(other.login(authKey(1)), http.StatusUnauthorized)
+	other.mustStatus(other.login(authKey(11)), http.StatusNoContent)
+	other.mustStatus(other.login(recoveryKey), http.StatusNoContent)
+	etag = out.ETag
+
+	// New recovery key only, proven with the rotated passphrase key.
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), recoveryKey: authKey(12), manifest: b64("manifest-v3"), ifMatch: etag}), http.StatusOK).decode(t, &out)
+	etag = out.ETag
+	other.mustStatus(other.login(recoveryKey), http.StatusUnauthorized)
+	other.mustStatus(other.login(authKey(12)), http.StatusNoContent)
+	other.mustStatus(other.login(authKey(11)), http.StatusNoContent)
+	if got := h.manifest(); got != "manifest-v3" {
+		t.Errorf("manifest = %q, want manifest-v3", got)
+	}
+
+	// New kdf only, sent with whitespace and served compacted.
+	newKDF := `{"name":"argon2id","m":262144,"t":4,"p":2,"salt":"BBBB"}`
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), kdf: `{ "name": "argon2id", "m": 262144, "t": 4, "p": 2, "salt": "BBBB" }`,
+		manifest: b64("manifest-v4"), ifMatch: etag}), http.StatusOK).decode(t, &out)
+	if body := h.mustStatus(h.do(http.MethodGet, "/api/kdf", nil), http.StatusOK).body; string(body) != newKDF {
+		t.Errorf("kdf = %s, want %s", body, newKDF)
+	}
+	if got := h.manifest(); got != "manifest-v4" {
+		t.Errorf("manifest = %q, want manifest-v4", got)
+	}
+
+	// The rotation survived on disk: only hashes and the kdf are stored.
+	data, err := os.ReadFile(filepath.Join(h.dataDir, "auth.json"))
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	for _, secret := range []string{authKey(1), authKey(11), authKey(12), recoveryKey} {
+		if bytes.Contains(data, []byte(secret)) {
+			t.Fatal("auth.json contains an auth key")
+		}
+	}
+	creds, err := auth.LoadCredentials(filepath.Join(h.dataDir, "auth.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	for _, key := range []string{authKey(11), authKey(12)} {
+		raw, _ := base64.StdEncoding.DecodeString(key)
+		if !creds.Verify(raw) {
+			t.Error("reloaded credentials reject a rotated key")
+		}
+	}
+	if string(creds.KDF()) != newKDF {
+		t.Errorf("reloaded kdf = %s, want %s", creds.KDF(), newKDF)
+	}
+}
+
+func TestRekeyErrors(t *testing.T) {
+	h := loggedIn(t, func(o *options) { o.cfg.MaxManifestBytes = 64 })
+	etag := h.putManifest("manifest-v1")
+
+	unchanged := func(context string) {
+		t.Helper()
+		if got := h.manifest(); got != "manifest-v1" {
+			t.Errorf("%s: manifest = %q, want manifest-v1", context, got)
+		}
+		other := h.newClient()
+		other.mustStatus(other.login(authKey(1)), http.StatusNoContent)
+	}
+
+	// The session is not enough: the current credential is mandatory, and it
+	// must be a valid one.
+	r := h.mustStatus(h.rekey(rekeyRequest{authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "invalid_auth_key" {
+		t.Errorf("missing current key: error = %q, want invalid_auth_key", got)
+	}
+	unchanged("missing current key")
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
+	if got := r.errorCode(t); got != "unauthorized" {
+		t.Errorf("wrong current key: error = %q, want unauthorized", got)
+	}
+	unchanged("wrong current key")
+
+	// None of the three optional fields.
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "bad_request" {
+		t.Errorf("no fields: error = %q, want bad_request", got)
+	}
+	unchanged("no fields")
+
+	// Stale precondition.
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x"), ifMatch: `"0000"`}), http.StatusPreconditionFailed)
+	if got := r.errorCode(t); got != "conflict" {
+		t.Errorf("stale etag: error = %q, want conflict", got)
+	}
+	unchanged("stale etag")
+
+	// Missing precondition when a manifest exists.
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x")}), http.StatusPreconditionRequired)
+	if got := r.errorCode(t); got != "if_match_required" {
+		t.Errorf("missing etag: error = %q, want if_match_required", got)
+	}
+	unchanged("missing etag")
+
+	// Malformed fields.
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: "not base64!", ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "bad_request" {
+		t.Errorf("bad manifest: error = %q, want bad_request", got)
+	}
+	r = h.mustStatus(h.rekey(rekeyRequest{current: "not base64!", authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "invalid_auth_key" {
+		t.Errorf("bad current key: error = %q, want invalid_auth_key", got)
+	}
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: "not base64!", manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "invalid_auth_key" {
+		t.Errorf("bad auth key: error = %q, want invalid_auth_key", got)
+	}
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), recoveryKey: authKey(11)[:10], manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "invalid_auth_key" {
+		t.Errorf("bad recovery key: error = %q, want invalid_auth_key", got)
+	}
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), kdf: `[1]`, manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	if got := r.errorCode(t); got != "invalid_kdf" {
+		t.Errorf("bad kdf: error = %q, want invalid_kdf", got)
+	}
+	h.mustStatus(h.postJSON("/api/rekey", `{"current_auth_key":`+quote(authKey(1))+`,"auth_key":`+quote(authKey(11))+`,"unknown":1}`), http.StatusBadRequest)
+	unchanged("malformed fields")
+
+	// Manifest over the limit, whether it fits the body limit or not.
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(strings.Repeat("x", 65)), ifMatch: etag}),
+		http.StatusRequestEntityTooLarge)
+	if got := r.errorCode(t); got != "too_large" {
+		t.Errorf("large manifest: error = %q, want too_large", got)
+	}
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(strings.Repeat("x", 64<<10)), ifMatch: etag}),
+		http.StatusRequestEntityTooLarge)
+	unchanged("large manifest")
+
+	// A manifest exactly at the limit goes through.
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(strings.Repeat("y", 64)), ifMatch: etag}), http.StatusOK)
+	if got := h.manifest(); got != strings.Repeat("y", 64) {
+		t.Errorf("manifest = %q, want 64 y's", got)
+	}
+}
+
+func TestRekeyRevokesOtherSessions(t *testing.T) {
+	h := loggedIn(t)
+	etag := h.putManifest("manifest-v1")
+
+	other := h.newClient()
+	other.mustStatus(other.login(authKey(1)), http.StatusNoContent)
+	other.mustStatus(other.do(http.MethodPut, "/api/session/key", strings.NewReader(`{"key":`+quote(authKey(9))+`}`)), http.StatusNoContent)
+	h.mustStatus(h.do(http.MethodPut, "/api/session/key", strings.NewReader(`{"key":`+quote(authKey(8))+`}`)), http.StatusNoContent)
+
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("manifest-v2"), ifMatch: etag}), http.StatusOK)
+
+	other.mustStatus(other.do(http.MethodGet, "/api/blobs", nil), http.StatusUnauthorized)
+	other.mustStatus(other.do(http.MethodGet, "/api/session/key", nil), http.StatusUnauthorized)
+	h.mustStatus(h.do(http.MethodGet, "/api/blobs", nil), http.StatusOK)
+	var key struct {
+		Key string `json:"key"`
+	}
+	h.mustStatus(h.do(http.MethodGet, "/api/session/key", nil), http.StatusOK).decode(t, &key)
+	if key.Key != authKey(8) {
+		t.Errorf("the rekeying session lost its key: %q", key.Key)
+	}
+
+	// A rejected rekey revokes nothing.
+	other.mustStatus(other.login(authKey(11)), http.StatusNoContent)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), authKey: authKey(12), manifest: b64("manifest-v3"), ifMatch: `"stale"`}), http.StatusPreconditionFailed)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(12), manifest: b64("manifest-v3"), ifMatch: `"stale"`}), http.StatusUnauthorized)
+	other.mustStatus(other.do(http.MethodGet, "/api/blobs", nil), http.StatusOK)
+}
+
+// The recovery flow holds only the recovery auth key, which is a current
+// credential as much as the passphrase one.
+func TestRekeyWithRecoveryKey(t *testing.T) {
+	h := loggedIn(t)
+	etag := h.putManifest("manifest-v1")
+
+	h.mustStatus(h.rekey(rekeyRequest{current: recoveryKey, authKey: authKey(11), manifest: b64("manifest-v2"), ifMatch: etag}), http.StatusOK)
+	if got := h.manifest(); got != "manifest-v2" {
+		t.Errorf("manifest = %q, want manifest-v2", got)
+	}
+	other := h.newClient()
+	other.mustStatus(other.login(authKey(1)), http.StatusUnauthorized)
+	other.mustStatus(other.login(authKey(11)), http.StatusNoContent)
+}
+
+func TestRekeyRateLimit(t *testing.T) {
+	// Setup and login spend two attempts; three wrong rekeys spend the rest.
+	h := loggedIn(t, func(o *options) {
+		o.limiter = auth.NewRateLimiter(5, time.Minute)
+	})
+	etag := h.putManifest("manifest-v1")
+
+	for range 3 {
+		h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
+	}
+	// The right credential is refused too while the window lasts.
+	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusTooManyRequests)
+	if got := r.errorCode(t); got != "rate_limited" {
+		t.Errorf("error = %q, want rate_limited", got)
+	}
+
+	// Nothing was written. The credentials are checked from disk, since a
+	// login would be rate limited as well.
+	if got := h.manifest(); got != "manifest-v1" {
+		t.Errorf("manifest = %q, want manifest-v1", got)
+	}
+	creds, err := auth.LoadCredentials(filepath.Join(h.dataDir, "auth.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	old, _ := base64.StdEncoding.DecodeString(authKey(1))
+	if !creds.Verify(old) {
+		t.Error("credentials rotated despite the rate limit")
+	}
+}
+
+func TestSessionKey(t *testing.T) {
+	h := loggedIn(t)
+	put := func(body string) response {
+		t.Helper()
+		return h.do(http.MethodPut, "/api/session/key", strings.NewReader(body), "Content-Type", "application/json")
+	}
+	get := func() response {
+		t.Helper()
+		return h.do(http.MethodGet, "/api/session/key", nil)
+	}
+
+	if got := h.mustStatus(get(), http.StatusNotFound).errorCode(t); got != "not_found" {
+		t.Errorf("error = %q, want not_found", got)
+	}
+
+	for name, body := range map[string]string{
+		"31 bytes":   `{"key":` + quote(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 31))) + `}`,
+		"33 bytes":   `{"key":` + quote(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 33))) + `}`,
+		"not base64": `{"key":"not base64!"}`,
+		"empty":      `{"key":""}`,
+		"missing":    `{}`,
+	} {
+		r := h.mustStatus(put(body), http.StatusBadRequest)
+		if got := r.errorCode(t); got != "invalid_session_key" {
+			t.Errorf("%s: error = %q, want invalid_session_key", name, got)
+		}
+	}
+	h.mustStatus(put(`{"key":"x"`), http.StatusBadRequest)
+	h.mustStatus(put(`{"unknown":"x"}`), http.StatusBadRequest)
+	h.mustStatus(get(), http.StatusNotFound)
+
+	var key struct {
+		Key string `json:"key"`
+	}
+	h.mustStatus(put(`{"key":`+quote(authKey(8))+`}`), http.StatusNoContent)
+	h.mustStatus(get(), http.StatusOK).decode(t, &key)
+	if key.Key != authKey(8) {
+		t.Errorf("key = %q, want %q", key.Key, authKey(8))
+	}
+
+	// A second PUT replaces the first.
+	h.mustStatus(put(`{"key":`+quote(authKey(9))+`}`), http.StatusNoContent)
+	h.mustStatus(get(), http.StatusOK).decode(t, &key)
+	if key.Key != authKey(9) {
+		t.Errorf("key after replacement = %q, want %q", key.Key, authKey(9))
+	}
+
+	// Keys are per session: another session does not see it.
+	other := h.newClient()
+	other.mustStatus(other.login(authKey(1)), http.StatusNoContent)
+	other.mustStatus(other.do(http.MethodGet, "/api/session/key", nil), http.StatusNotFound)
+	h.mustStatus(get(), http.StatusOK)
+
+	// Logout drops it, and a new session starts without one.
+	h.mustStatus(h.do(http.MethodPost, "/api/logout", nil), http.StatusNoContent)
+	h.mustStatus(get(), http.StatusUnauthorized)
+	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
+	h.mustStatus(get(), http.StatusNotFound)
 }

@@ -136,7 +136,9 @@ DEK, 32 random bytes, protects the whole archive
   Web Worker. The salt is 16 random bytes and is public: it makes precomputed
   tables useless, and on its own gives an attacker nothing to test guesses
   against. The parameters are stored, not hardcoded, so they can be raised
-  later through a rekey.
+  later through a rekey. The client accepts only `m` between 8192 and
+  1048576 KiB, `t` between 1 and 10, `p` of 1 and a 16-byte salt, so a
+  hostile server cannot hand back parameters that make guessing cheap.
 - **HKDF** splits one strong key into independent purpose-bound keys. It is
   one-way, so a server that learns the auth key learns nothing about the KEK,
   and one key per purpose keeps a flaw in any component from reaching the
@@ -264,9 +266,11 @@ instant.
 ### Account flows
 
 - **Setup.** Generate DEK, recovery key and salt. Derive the root in the
-  worker, expand both KEKs and both auth keys, wrap the DEK twice. Register
-  with the server (both auth keys and the KDF parameters), log in, upload the
-  manifest, persist the session key, show the 24 words.
+  worker, expand both KEKs and both auth keys, wrap the DEK twice, build the
+  manifest. Register with the server in one request carrying both auth keys,
+  the KDF parameters and the manifest, so an account can never exist without
+  the wrapped DEK that makes it usable. Log in, persist the session key, show
+  the 24 words.
 - **Unlock.** Fetch the KDF parameters, derive, log in. A wrong passphrase
   stops here, so the manifest is never fetched with a bad key. Fetch the
   manifest, unwrap the DEK, derive subkeys, persist the session key.
@@ -281,9 +285,15 @@ instant.
 - **Rekey** (passphrase change, recovery key change, parameter change). New
   salt or new recovery key, rewrap the DEK, rebuild the manifest header, and
   send the changed credentials and the new manifest in one call under the
-  manifest's ETag. One call matters: two separate requests could leave a
+  manifest's ETag, together with a current credential (the old passphrase's
+  auth key, or the recovery auth key) so a hijacked session alone cannot
+  rotate anything. One call matters: two separate requests could leave a
   state where one passphrase logs in and the other decrypts. With one, a
-  failure leaves the old passphrase fully working and the change is retried.
+  failure leaves the old passphrase fully working and the change is retried
+  under the new ETag. The only exception is a crash between the server's
+  two file renames, which leaves the new manifest under the old
+  credentials; the same retry repairs it. A successful rekey revokes every
+  other session.
 
 ## Server API
 
@@ -293,11 +303,13 @@ detail.
 
 ```
 GET    /api/health                    liveness and whether the archive is set up
-GET    /api/kdf                       KDF parameters and salt, needed before login
-POST   /api/setup                     both auth keys + kdf → creates the single account
+GET    /api/kdf                       KDF parameters as stored; 409 before setup
+POST   /api/setup                     JSON: both auth keys, kdf and the manifest (base64)
+                                      → creates the single account, atomically
 POST   /api/login                     either auth key → session cookie
 POST   /api/logout
-POST   /api/rekey                     new credentials and/or kdf + new manifest, atomically
+POST   /api/rekey                     JSON: current auth key, new credentials and/or
+                                      kdf, manifest (base64) and if_match; atomic
 PUT    /api/session/key               32 bytes kept in memory on the session
 GET    /api/session/key
 GET    /api/manifest                  returns ciphertext + ETag
@@ -313,12 +325,18 @@ GET    /api/blobs                     listing, for garbage collection
   web app shows the create-account screen. The first `POST /api/setup` wins,
   becomes the only account, and the route is refused forever after. There is
   no setup token: an empty archive belongs to whoever reaches it first, which
-  on a private network is the operator.
-- **Credentials.** The server holds the SHA-256 of the passphrase auth key,
-  the SHA-256 of the recovery auth key, and the KDF parameters as an opaque,
-  size-bounded JSON value it serves verbatim. Login checks both hashes
-  without short-circuiting. Rekey replaces the file atomically after the
-  manifest write under `If-Match` has succeeded.
+  on a private network is the operator. The server writes the manifest first
+  and the credentials second; a manifest orphaned by a crash in between is
+  overwritten by the next setup, which is only reachable while there are no
+  credentials.
+- **ETags** are opaque strings the client passes back verbatim, quotes
+  included, in `If-Match` and in the `if_match` field of setup and rekey.
+- **Credentials.** A version-2 JSON file holding the SHA-256 of the
+  passphrase auth key, the SHA-256 of the recovery auth key, and the KDF
+  parameters as an opaque JSON object, compacted and capped at 1 KiB, served
+  verbatim. Login checks both hashes without short-circuiting. Rekey verifies
+  the presented current credential, writes the manifest under `If-Match`,
+  then replaces the file atomically. Rekey shares the login rate limit.
 - **Session key.** Set by the client after unlock, stored only in memory on
   the session record, never on disk, and gone with logout or expiry. Setting
   it again replaces it.
@@ -330,8 +348,9 @@ GET    /api/blobs                     listing, for garbage collection
   byte for byte. The client treats 409 as "already there".
 - **Sessions** are random tokens in an HttpOnly, SameSite=Strict cookie,
   stored server-side only as hashes, in memory, with a 24 h idle timeout and
-  a 7 day absolute lifetime. A restart logs everyone out.
-- **Abuse limits.** Login and setup share a per-address rate limit. Blob and
+  a 7 day absolute lifetime. A restart logs everyone out; a rekey logs every
+  other session out.
+- **Abuse limits.** Login, setup and rekey share a per-address rate limit. Blob and
   manifest bodies are capped. State-changing requests must carry a
   same-origin `Sec-Fetch-Site` or a matching `Origin`.
 

@@ -87,10 +87,14 @@ func (s *Server) routes() http.Handler {
 
 	// Open routes: everything else needs a session.
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/kdf", s.handleKDF)
 	mux.HandleFunc("POST /api/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 
 	mux.Handle("POST /api/logout", s.requireSession(s.handleLogout))
+	mux.Handle("POST /api/rekey", s.requireSession(s.handleRekey))
+	mux.Handle("PUT /api/session/key", s.requireSession(s.handlePutSessionKey))
+	mux.Handle("GET /api/session/key", s.requireSession(s.handleGetSessionKey))
 	mux.Handle("GET /api/manifest", s.requireSession(s.handleGetManifest))
 	mux.Handle("PUT /api/manifest", s.requireSession(s.handlePutManifest))
 	mux.Handle("GET /api/blobs", s.requireSession(s.handleListBlobs))

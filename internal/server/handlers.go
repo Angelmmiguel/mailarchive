@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,6 +26,8 @@ const (
 	codeAlreadySetup    = "already_setup"
 	codeInvalidID       = "invalid_id"
 	codeInvalidAuthKey  = "invalid_auth_key"
+	codeInvalidKDF      = "invalid_kdf"
+	codeInvalidSessKey  = "invalid_session_key"
 	codeExists          = "exists"
 	codeTooLarge        = "too_large"
 	codeTooManyIDs      = "too_many_ids"
@@ -34,15 +37,19 @@ const (
 	codeInternal        = "internal"
 )
 
-// maxCredentialBody bounds the setup and login bodies, which carry nothing but
-// a token and a base64 key.
-const maxCredentialBody = 4 << 10
+// Body limits for the small JSON routes. Login and the session key carry one
+// base64 key; setup adds a second key and the KDF parameters, themselves
+// bounded by auth.MaxKDFBytes. Setup and rekey also carry a base64 manifest,
+// so their limits are derived from the manifest limit in the handlers.
+const (
+	maxCredentialBody = 4 << 10
+	maxSetupBody      = 8 << 10
+)
 
 const contentTypeOctet = "application/octet-stream"
 
-// handleHealth reports liveness and whether the archive has been set up. It is
-// the only route that answers before login, so the web app can decide between
-// the setup and the unlock screen.
+// handleHealth reports liveness and whether the archive has been set up, so
+// the web app can decide between the setup and the unlock screen.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Status string `json:"status"`
@@ -50,25 +57,42 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}{Status: "ok", Setup: s.creds.IsSetup()})
 }
 
-// handleSetup creates the archive's single account. The first successful call
-// wins and the route is refused from then on: an empty archive belongs to
-// whoever reaches it first, which is the operator on a private network. The
-// manifest is not created here; the client uploads it after logging in.
+// handleKDF serves the stored KDF parameters, which the client needs before
+// it can derive its auth key and log in. They are public by design: the salt
+// only defeats precomputation and on its own gives nothing to test guesses
+// against. The body is the object exactly as stored and nothing else.
+func (s *Server) handleKDF(w http.ResponseWriter, _ *http.Request) {
+	kdf := s.creds.KDF()
+	if kdf == nil {
+		writeError(w, http.StatusConflict, codeNotSetup)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	h.Set("Content-Length", strconv.Itoa(len(kdf)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(kdf)
+}
+
+// handleSetup creates the archive's single account together with its first
+// manifest. One request, because the manifest holds the wrapped DEK and the
+// DEK exists only in the client's memory until it is stored: credentials
+// without a manifest would be an account nothing can decrypt, and setup can
+// never be repeated. The first successful call wins and the route is refused
+// from then on: an empty archive belongs to whoever reaches it first, which
+// is the operator on a private network.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if s.creds.IsSetup() {
 		writeError(w, http.StatusConflict, codeAlreadySetup)
 		return
 	}
-	// Unauthenticated route: share the login limiter and count every attempt.
-	if !s.limiter.Allow(clientIP(r)) {
-		s.log.Warn("setup rate limited", "remote", clientIP(r))
-		writeError(w, http.StatusTooManyRequests, codeRateLimited)
-		return
-	}
 	var req struct {
-		AuthKey string `json:"auth_key"`
+		AuthKey         string          `json:"auth_key"`
+		RecoveryAuthKey string          `json:"recovery_auth_key"`
+		KDF             json.RawMessage `json:"kdf"`
+		Manifest        string          `json:"manifest"`
 	}
-	if !readJSON(w, r, maxCredentialBody, &req) {
+	if !readJSON(w, r, s.cfg.MaxManifestBytes*4/3+maxSetupBody, &req) {
 		return
 	}
 	key, err := auth.DecodeAuthKey(req.AuthKey)
@@ -76,16 +100,65 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeInvalidAuthKey)
 		return
 	}
-	switch err := s.creds.Setup(key); {
+	recoveryKey, err := auth.DecodeAuthKey(req.RecoveryAuthKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidAuthKey)
+		return
+	}
+	if err := auth.ValidateKDF(req.KDF); err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidKDF)
+		return
+	}
+	if req.Manifest == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return
+	}
+	manifest, err := base64.StdEncoding.DecodeString(req.Manifest)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return
+	}
+	if int64(len(manifest)) > s.cfg.MaxManifestBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge)
+		return
+	}
+
+	// Unauthenticated route: share the login limiter and count every attempt.
+	if !s.limiter.Allow(clientIP(r)) {
+		s.log.Warn("setup rate limited", "remote", clientIP(r))
+		writeError(w, http.StatusTooManyRequests, codeRateLimited)
+		return
+	}
+
+	// A manifest may already exist: an earlier attempt that crashed after
+	// writing it but before the credentials left an orphan. This route is
+	// only reachable while there are no credentials, so that orphan belongs
+	// to nobody and is safe to replace, which PutManifest only does under
+	// the ETag it currently has.
+	_, etag, err := s.store.Manifest(r.Context())
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.fail(w, r, err)
+		return
+	}
+	if _, err := s.store.PutManifest(r.Context(), manifest, etag); err != nil {
+		if errors.Is(err, store.ErrManifestConflict) {
+			writeError(w, http.StatusConflict, codeConflict)
+			return
+		}
+		s.fail(w, r, err)
+		return
+	}
+	// The manifest is written. If the credentials do not follow, it is either
+	// the manifest of a concurrent setup that won the race and wrote after
+	// us, or an orphan the next setup overwrites; neither needs cleaning up.
+	switch err := s.creds.Setup(key, recoveryKey, req.KDF); {
 	case err == nil:
 	case errors.Is(err, auth.ErrAlreadySetup):
 		writeError(w, http.StatusConflict, codeAlreadySetup)
 		return
-	case errors.Is(err, auth.ErrInvalidKey):
-		writeError(w, http.StatusBadRequest, codeInvalidAuthKey)
-		return
 	default:
-		s.fail(w, r, err)
+		s.log.Error("setup: manifest written but credentials not created", "error", err)
+		writeError(w, http.StatusInternalServerError, codeInternal)
 		return
 	}
 	s.log.Info("archive set up", "remote", clientIP(r))
@@ -121,13 +194,163 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleLogout revokes the current session.
+// handleLogout revokes the current session, and with it the session key.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		s.sessions.Revoke(c.Value)
-	}
+	s.sessions.Revoke(sessionToken(r))
 	s.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRekey replaces credentials and manifest in one call, so a passphrase
+// or recovery key change cannot leave one credential logging in while the
+// other decrypts. The manifest goes first under its If-Match, exactly as
+// PUT /api/manifest; then the credentials file is replaced; then every other
+// session is revoked, since a session opened with the old passphrase must
+// not survive it.
+//
+// The session alone is not proof enough: a hijacked cookie could otherwise
+// rotate both keys and lock the owner out. The caller must also present a
+// current credential, either auth key, as a password change asks for the old
+// password. That check is a second place to guess a credential, so it shares
+// the login rate limiter.
+func (s *Server) handleRekey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CurrentAuthKey  string          `json:"current_auth_key"`
+		AuthKey         string          `json:"auth_key"`
+		RecoveryAuthKey string          `json:"recovery_auth_key"`
+		KDF             json.RawMessage `json:"kdf"`
+		Manifest        string          `json:"manifest"`
+		IfMatch         string          `json:"if_match"`
+	}
+	if !readJSON(w, r, s.cfg.MaxManifestBytes*4/3+maxSetupBody, &req) {
+		return
+	}
+	current, err := auth.DecodeAuthKey(req.CurrentAuthKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidAuthKey)
+		return
+	}
+	if req.AuthKey == "" && req.RecoveryAuthKey == "" && req.KDF == nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return
+	}
+	// Everything is validated before the manifest is written: a rejected
+	// field must leave both manifest and credentials untouched.
+	var key, recoveryKey []byte
+	if req.AuthKey != "" {
+		if key, err = auth.DecodeAuthKey(req.AuthKey); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidAuthKey)
+			return
+		}
+	}
+	if req.RecoveryAuthKey != "" {
+		if recoveryKey, err = auth.DecodeAuthKey(req.RecoveryAuthKey); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidAuthKey)
+			return
+		}
+	}
+	if req.KDF != nil {
+		if err = auth.ValidateKDF(req.KDF); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidKDF)
+			return
+		}
+	}
+	manifest, err := base64.StdEncoding.DecodeString(req.Manifest)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return
+	}
+	if int64(len(manifest)) > s.cfg.MaxManifestBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge)
+		return
+	}
+
+	// As in login, every attempt counts, not only the failures.
+	if !s.limiter.Allow(clientIP(r)) {
+		s.log.Warn("rekey rate limited", "remote", clientIP(r))
+		writeError(w, http.StatusTooManyRequests, codeRateLimited)
+		return
+	}
+	if !s.creds.Verify(current) {
+		s.log.Warn("rekey credential rejected", "remote", clientIP(r))
+		writeError(w, http.StatusUnauthorized, codeUnauthorized)
+		return
+	}
+
+	etag, err := s.store.PutManifest(r.Context(), manifest, strings.TrimSpace(req.IfMatch))
+	switch {
+	case err == nil:
+	case errors.Is(err, store.ErrIfMatchRequired):
+		writeError(w, http.StatusPreconditionRequired, codeIfMatchRequired)
+		return
+	case errors.Is(err, store.ErrManifestConflict):
+		writeError(w, http.StatusPreconditionFailed, codeConflict)
+		return
+	default:
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.creds.Rotate(key, recoveryKey, req.KDF); err != nil {
+		// The manifest is already replaced but the credentials are not, so
+		// the old keys still log in. The client answers a 500 by retrying
+		// the rekey under the new ETag, which is idempotent. The same retry
+		// repairs the other way this state arises: a crash between the two
+		// renames.
+		s.log.Error("rekey: manifest replaced but credentials not rotated", "error", err)
+		writeError(w, http.StatusInternalServerError, codeInternal)
+		return
+	}
+	s.sessions.RevokeOthers(sessionToken(r))
+	s.log.Info("credentials rotated", "remote", clientIP(r))
+	w.Header().Set("ETag", etag)
+	writeJSON(w, http.StatusOK, struct {
+		ETag string `json:"etag"`
+	}{ETag: etag})
+}
+
+// handlePutSessionKey stores the server half of the client's split session
+// key on the current session, replacing any previous one. It lives only in
+// memory and goes with the session.
+func (s *Server) handlePutSessionKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key string `json:"key"`
+	}
+	if !readJSON(w, r, maxCredentialBody, &req) {
+		return
+	}
+	key, err := base64.StdEncoding.DecodeString(req.Key)
+	if err != nil || len(key) != auth.SessionKeyLen {
+		writeError(w, http.StatusBadRequest, codeInvalidSessKey)
+		return
+	}
+	if !s.sessions.SetKey(sessionToken(r), key) {
+		// The session expired between requireSession and here.
+		writeError(w, http.StatusUnauthorized, codeUnauthorized)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetSessionKey returns the current session's key, if one was set.
+func (s *Server) handleGetSessionKey(w http.ResponseWriter, r *http.Request) {
+	key, ok := s.sessions.Key(sessionToken(r))
+	if !ok {
+		writeError(w, http.StatusNotFound, codeNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Key string `json:"key"`
+	}{Key: base64.StdEncoding.EncodeToString(key)})
+}
+
+// sessionToken returns the session cookie of a request that requireSession
+// has already admitted. A missing cookie yields "", which no session matches.
+func sessionToken(r *http.Request) string {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return ""
+	}
+	return c.Value
 }
 
 // handleGetManifest returns the encrypted manifest and its ETag.
