@@ -45,15 +45,73 @@ describe('health', () => {
 	});
 });
 
+const kdf = {
+	name: 'argon2id' as const,
+	m: 65536,
+	t: 3,
+	p: 1,
+	salt: Buffer.alloc(16, 2).toString('base64')
+};
+
+describe('kdf', () => {
+	it('returns the raw JSON for the caller to validate', async () => {
+		replyJSON(kdf);
+
+		await expect(api.kdf()).resolves.toEqual(kdf);
+		expect(lastRequest().url).toBe('/api/kdf');
+	});
+
+	it('rejects not_setup', async () => {
+		replyJSON({ error: 'not_setup' }, 409);
+
+		await expect(api.kdf()).rejects.toThrow(
+			expect.objectContaining({ status: 409, code: 'not_setup' })
+		);
+	});
+});
+
 describe('setup and login', () => {
-	it('send the auth key base64-encoded the way Go decodes it', async () => {
-		const key = new Uint8Array(32).map((_, i) => i * 7);
+	const manifest = new Uint8Array([9, 8, 7]);
+
+	it('setup sends both auth keys, the kdf and the manifest, base64 the way Go decodes it', async () => {
+		const authKey = new Uint8Array(32).map((_, i) => i * 7);
+		const recoveryAuthKey = new Uint8Array(32).map((_, i) => i * 11);
 		reply(null, 201);
 
-		await api.setup(key);
+		await expect(api.setup({ authKey, recoveryAuthKey, kdf, manifest })).resolves.toBeUndefined();
 
 		const { url, init } = lastRequest();
 		expect(url).toBe('/api/setup');
+		expect(init.method).toBe('POST');
+		expect(header('Content-Type')).toBe('application/json');
+		expect(JSON.parse(String(init.body))).toEqual({
+			auth_key: Buffer.from(authKey).toString('base64'),
+			recovery_auth_key: Buffer.from(recoveryAuthKey).toString('base64'),
+			kdf,
+			manifest: Buffer.from(manifest).toString('base64')
+		});
+	});
+
+	it.each([
+		{ status: 409, code: 'already_setup' },
+		{ status: 400, code: 'invalid_kdf' },
+		{ status: 413, code: 'too_large' }
+	])('setup rejects $status as $code', async ({ status, code }) => {
+		replyJSON({ error: code }, status);
+
+		await expect(
+			api.setup({ authKey: new Uint8Array(32), recoveryAuthKey: new Uint8Array(32), kdf, manifest })
+		).rejects.toThrow(expect.objectContaining({ status, code }));
+	});
+
+	it('login sends the auth key base64-encoded', async () => {
+		const key = new Uint8Array(32).map((_, i) => i * 7);
+		reply(null, 204);
+
+		await api.login(key);
+
+		const { url, init } = lastRequest();
+		expect(url).toBe('/api/login');
 		expect(init.method).toBe('POST');
 		expect(init.body).toBe(JSON.stringify({ auth_key: Buffer.from(key).toString('base64') }));
 	});
@@ -122,6 +180,123 @@ describe('manifest', () => {
 			expect.objectContaining({ status, code })
 		);
 	});
+});
+
+describe('rekey', () => {
+	const manifest = new Uint8Array([9, 8, 7]);
+	const currentAuthKey = new Uint8Array(32).map((_, i) => 200 - i);
+
+	it('sends the current credential, the changes, the manifest and if_match in one body', async () => {
+		const authKey = new Uint8Array(32).map((_, i) => i + 1);
+		replyJSON({ etag: '"v2"' });
+
+		await expect(
+			api.rekey({ currentAuthKey, authKey, kdf, manifest, ifMatch: '"v1"' })
+		).resolves.toEqual({ etag: '"v2"' });
+
+		const { url, init } = lastRequest();
+		expect(url).toBe('/api/rekey');
+		expect(init.method).toBe('POST');
+		expect(header('If-Match')).toBeUndefined();
+		expect(JSON.parse(String(init.body))).toEqual({
+			current_auth_key: Buffer.from(currentAuthKey).toString('base64'),
+			auth_key: Buffer.from(authKey).toString('base64'),
+			kdf,
+			manifest: Buffer.from(manifest).toString('base64'),
+			if_match: '"v1"'
+		});
+	});
+
+	it('omits credentials that do not change', async () => {
+		const recoveryAuthKey = new Uint8Array(32).map((_, i) => i + 1);
+		replyJSON({ etag: '"v2"' });
+
+		await api.rekey({ currentAuthKey, recoveryAuthKey, manifest, ifMatch: '"v1"' });
+
+		expect(JSON.parse(String(lastRequest().init.body))).toEqual({
+			current_auth_key: Buffer.from(currentAuthKey).toString('base64'),
+			recovery_auth_key: Buffer.from(recoveryAuthKey).toString('base64'),
+			manifest: Buffer.from(manifest).toString('base64'),
+			if_match: '"v1"'
+		});
+	});
+
+	it.each([
+		{ status: 401, code: 'unauthorized' },
+		{ status: 412, code: 'conflict' },
+		{ status: 428, code: 'if_match_required' },
+		{ status: 400, code: 'invalid_kdf' },
+		{ status: 429, code: 'rate_limited' }
+	])('rejects $status as $code', async ({ status, code }) => {
+		replyJSON({ error: code }, status);
+
+		await expect(api.rekey({ currentAuthKey, manifest, ifMatch: '"v1"' })).rejects.toThrow(
+			expect.objectContaining({ status, code })
+		);
+	});
+
+	it('rejects an answer without an etag', async () => {
+		replyJSON({});
+
+		await expect(api.rekey({ currentAuthKey, manifest, ifMatch: '"v1"' })).rejects.toThrow(
+			expect.objectContaining({ code: 'malformed' })
+		);
+	});
+});
+
+describe('session key', () => {
+	const key = new Uint8Array(32).map((_, i) => 255 - i);
+
+	it('is stored with PUT as base64', async () => {
+		reply(null, 204);
+
+		await expect(api.putSessionKey(key)).resolves.toBeUndefined();
+
+		const { url, init } = lastRequest();
+		expect(url).toBe('/api/session/key');
+		expect(init.method).toBe('PUT');
+		expect(init.body).toBe(JSON.stringify({ key: Buffer.from(key).toString('base64') }));
+	});
+
+	it('rejects invalid_session_key', async () => {
+		replyJSON({ error: 'invalid_session_key' }, 400);
+
+		await expect(api.putSessionKey(new Uint8Array(3))).rejects.toThrow(
+			expect.objectContaining({ status: 400, code: 'invalid_session_key' })
+		);
+	});
+
+	it('is fetched back as bytes', async () => {
+		replyJSON({ key: Buffer.from(key).toString('base64') });
+
+		await expect(api.getSessionKey()).resolves.toEqual(key);
+		expect(lastRequest()).toMatchObject({ url: '/api/session/key' });
+	});
+
+	it('is null when none was stored', async () => {
+		replyJSON({ error: 'not_found' }, 404);
+
+		await expect(api.getSessionKey()).resolves.toBeNull();
+	});
+
+	it('rejects a session that expired', async () => {
+		replyJSON({ error: 'unauthorized' }, 401);
+
+		await expect(api.getSessionKey()).rejects.toThrow(
+			expect.objectContaining({ status: 401, code: 'unauthorized' })
+		);
+	});
+
+	it.each([{ key: 5 }, { key: 'not base64!' }, [], null])(
+		'rejects a malformed body %j',
+		async (body) => {
+			replyJSON(body);
+
+			await expect(api.getSessionKey()).rejects.toThrow(
+				expect.objectContaining({ code: 'malformed' })
+			);
+		}
+	);
 });
 
 describe('blobs', () => {

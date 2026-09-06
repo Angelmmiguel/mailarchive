@@ -934,8 +934,8 @@ func TestRekeyErrors(t *testing.T) {
 	}
 	unchanged("missing current key")
 	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
-	if got := r.errorCode(t); got != "unauthorized" {
-		t.Errorf("wrong current key: error = %q, want unauthorized", got)
+	if got := r.errorCode(t); got != "wrong_credential" {
+		t.Errorf("wrong current key: error = %q, want wrong_credential", got)
 	}
 	unchanged("wrong current key")
 
@@ -1053,7 +1053,10 @@ func TestRekeyRateLimit(t *testing.T) {
 	etag := h.putManifest("manifest-v1")
 
 	for range 3 {
-		h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
+		r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
+		if got := r.errorCode(t); got != "wrong_credential" {
+			t.Errorf("error = %q, want wrong_credential", got)
+		}
 	}
 	// The right credential is refused too while the window lasts.
 	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusTooManyRequests)

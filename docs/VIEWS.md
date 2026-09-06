@@ -106,3 +106,19 @@ Lock. Later: garbage collection, user-defined labels.
 Present around every view after unlock: search entry, Import button with the
 background progress indicator, Settings, Lock. Toasts for errors and
 completed imports. A persistent banner when the server is unreachable.
+
+## Implementation notes
+
+Things the account layer cannot handle on its own and the screens must.
+
+- **Setup that succeeds without showing the phrase.** `createAccount` sends
+  the account and manifest in one request; if the login or manifest fetch
+  right after it fails, the account exists and the passphrase unlocks it, but
+  the recovery phrase was never displayed. Create account should catch that
+  case, tell the user the account was created, send them to Unlock, and
+  prompt them to generate a recovery key from Settings once inside.
+- **The Argon2id worker is only bundled once a route imports it.** Nothing in
+  the library slice reaches `deriveRootInWorker` from a page, so the build
+  emits no worker chunk yet. The first screen that unlocks or creates an
+  account should confirm a worker file appears in `web/build` and that the
+  derivation runs off the main thread.

@@ -330,7 +330,10 @@ GET    /api/blobs                     listing, for garbage collection
   overwritten by the next setup, which is only reachable while there are no
   credentials.
 - **ETags** are opaque strings the client passes back verbatim, quotes
-  included, in `If-Match` and in the `if_match` field of setup and rekey.
+  included, in `If-Match` on manifest writes and in the `if_match` field of
+  rekey. Setup needs none: it creates the manifest. A rejected current
+  credential on rekey answers 401 `wrong_credential`, distinct from the 401
+  `unauthorized` of a dead session, so the app can say which happened.
 - **Credentials.** A version-2 JSON file holding the SHA-256 of the
   passphrase auth key, the SHA-256 of the recovery auth key, and the KDF
   parameters as an opaque JSON object, compacted and capped at 1 KiB, served

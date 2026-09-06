@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -41,9 +42,11 @@ usage:
   mailarchive serve [flags]
 
 flags:
-  --addr         listen address (env MAILARCHIVE_ADDR, default :8080)
-  --data         data directory (env MAILARCHIVE_DATA, default ./data)
-  --secure       mark the session cookie Secure; use it behind HTTPS
+  --addr            listen address (env MAILARCHIVE_ADDR, default :8080)
+  --data            data directory (env MAILARCHIVE_DATA, default ./data)
+  --login-attempts  login, setup and rekey attempts allowed per address and
+                    minute (env MAILARCHIVE_LOGIN_ATTEMPTS, default 10)
+  --secure          mark the session cookie Secure; use it behind HTTPS
 `)
 }
 
@@ -52,6 +55,7 @@ func serve(args []string) error {
 	fs.Usage = usage
 	addr := fs.String("addr", env("MAILARCHIVE_ADDR", ":8080"), "listen address")
 	dataDir := fs.String("data", env("MAILARCHIVE_DATA", "./data"), "data directory")
+	loginAttempts := fs.Int("login-attempts", envInt("MAILARCHIVE_LOGIN_ATTEMPTS", auth.DefaultLoginAttempts), "login attempts per address and minute")
 	secure := fs.Bool("secure", false, "mark the session cookie Secure")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -73,7 +77,7 @@ func serve(args []string) error {
 		UI:     web.Handler(),
 		Logger: log,
 	}, st, creds, auth.NewSessionStore(auth.DefaultSessionTTL, auth.DefaultSessionMaxAge),
-		auth.NewRateLimiter(auth.DefaultLoginAttempts, auth.DefaultLoginWindow))
+		auth.NewRateLimiter(*loginAttempts, auth.DefaultLoginWindow))
 
 	if !*secure {
 		log.Warn("session cookie is not marked Secure; run behind HTTPS with --secure outside a trusted LAN")
@@ -123,6 +127,15 @@ func serve(args []string) error {
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// envInt falls back when the variable is unset or not a number; a value out
+// of range is NewRateLimiter's to correct.
+func envInt(key string, fallback int) int {
+	if n, err := strconv.Atoi(os.Getenv(key)); err == nil {
+		return n
 	}
 	return fallback
 }

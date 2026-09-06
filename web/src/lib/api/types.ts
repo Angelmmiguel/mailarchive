@@ -5,12 +5,15 @@
 export type ServerErrorCode =
 	| 'bad_request'
 	| 'unauthorized'
+	| 'wrong_credential'
 	| 'forbidden'
 	| 'not_found'
 	| 'not_setup'
 	| 'already_setup'
 	| 'invalid_id'
 	| 'invalid_auth_key'
+	| 'invalid_kdf'
+	| 'invalid_session_key'
 	| 'exists'
 	| 'too_large'
 	| 'too_many_ids'
@@ -19,8 +22,12 @@ export type ServerErrorCode =
 	| 'if_match_required'
 	| 'internal';
 
-/** A server code, or `unknown` when the response carried no JSON error code. */
-export type ErrorCode = ServerErrorCode | 'unknown';
+/**
+ * A server code, `unknown` when the response carried no JSON error code, or
+ * `malformed` when a successful response did not have the shape the route
+ * promises.
+ */
+export type ErrorCode = ServerErrorCode | 'unknown' | 'malformed';
 
 /**
  * The byte buffers this API deals in. Spelling the backing store out excludes

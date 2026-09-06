@@ -20,6 +20,7 @@ import (
 const (
 	codeBadRequest      = "bad_request"
 	codeUnauthorized    = "unauthorized"
+	codeWrongCredential = "wrong_credential" //nolint:gosec // an error code, not a secret
 	codeForbidden       = "forbidden"
 	codeNotFound        = "not_found"
 	codeNotSetup        = "not_setup"
@@ -212,7 +213,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // rotate both keys and lock the owner out. The caller must also present a
 // current credential, either auth key, as a password change asks for the old
 // password. That check is a second place to guess a credential, so it shares
-// the login rate limiter.
+// the login rate limiter. A rejected credential answers 401 wrong_credential,
+// distinct from the unauthorized of a dead session, so the client can tell
+// "wrong passphrase" from "unlock again".
 func (s *Server) handleRekey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CurrentAuthKey  string          `json:"current_auth_key"`
@@ -273,7 +276,7 @@ func (s *Server) handleRekey(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.creds.Verify(current) {
 		s.log.Warn("rekey credential rejected", "remote", clientIP(r))
-		writeError(w, http.StatusUnauthorized, codeUnauthorized)
+		writeError(w, http.StatusUnauthorized, codeWrongCredential)
 		return
 	}
 
