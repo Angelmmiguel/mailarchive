@@ -1,21 +1,17 @@
 /**
  * The account flows against a live Go server: the real client, the real
- * Argon2id, real cookies and a real credentials file. Skipped unless
- * MAILARCHIVE_E2E names the base URL of a server that has never been set up.
+ * Argon2id, real cookies and a real credentials file. Part of the vitest
+ * `e2e` project, whose global setup builds and starts a throwaway server
+ * over a temporary data directory (see tests/server.ts):
  *
- *     just web-e2e
- *
- * starts a throwaway server and runs this file against it. By hand:
- *
- *     go run ./cmd/mailarchive serve --addr 127.0.0.1:18100 --data "$(mktemp -d)" &
- *     cd web && MAILARCHIVE_E2E=http://127.0.0.1:18100 pnpm vitest run src/lib/account/e2e.test.ts
+ *     pnpm vitest run --project e2e
  *
  * The steps build on each other and run in file order, so a failure
  * cascades into the steps after it: read the first one. The scenario makes
  * more login attempts than the default rate limit allows in a minute, which
- * is why the recipe starts the server with --login-attempts raised.
+ * is why the server is started with --login-attempts raised.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import * as client from '$lib/api/client';
 import { encodeBase64 } from '$lib/api/encoding';
 import type { Bytes } from '$lib/api/types';
@@ -30,11 +26,7 @@ import { changePassphrase, regenerateRecoveryKey } from './rotate';
 import { createAccount } from './setup';
 import { lock, resume, unlock } from './unlock';
 
-const base = process.env.MAILARCHIVE_E2E ?? '';
-const live = base === '' ? describe.skip : describe;
-
-/** Room for the real Argon2id and a few round trips per step. */
-const step = { timeout: 30_000 };
+const base = inject('base');
 
 /** The real code path at the smallest cost `parseKdfParams` accepts. */
 const deps: Deps = {
@@ -82,7 +74,7 @@ function dekCopy(): Bytes {
 	return Uint8Array.from(session.dek);
 }
 
-live('account flows against a live server', () => {
+describe('account flows against a live server', () => {
 	const p1 = 'first passphrase of the run';
 	const p2 = 'second passphrase of the run';
 	const p3 = 'third passphrase of the run';
@@ -103,11 +95,11 @@ live('account flows against a live server', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('reports an archive that is not set up', step, async () => {
+	it('reports an archive that is not set up', async () => {
 		await expect(client.health()).resolves.toEqual({ status: 'ok', setup: false });
 	});
 
-	it('createAccount sets up, logs in and unlocks with a 24-word phrase', step, async () => {
+	it('createAccount sets up, logs in and unlocks with a 24-word phrase', async () => {
 		({ recoveryPhrase: phrase1 } = await createAccount(p1, addresses, deps));
 
 		expect(phrase1.split(' ')).toHaveLength(24);
@@ -119,7 +111,7 @@ live('account flows against a live server', () => {
 		await expect(client.health()).resolves.toEqual({ status: 'ok', setup: true });
 	});
 
-	it('resume reopens the session after a reload, without the passphrase', step, async () => {
+	it('resume reopens the session after a reload, without the passphrase', async () => {
 		// A reload loses memory and keeps sessionStorage and the cookie.
 		session.lock();
 
@@ -128,7 +120,7 @@ live('account flows against a live server', () => {
 		expect(session.manifest?.body.settings.ownAddresses).toEqual(addresses);
 	});
 
-	it('lock revokes the session, so resume reports locked', step, async () => {
+	it('lock revokes the session, so resume reports locked', async () => {
 		await lock(deps);
 
 		expect(session.status).toBe('locked');
@@ -138,12 +130,12 @@ live('account flows against a live server', () => {
 		);
 	});
 
-	it('unlock rejects a wrong passphrase', step, async () => {
+	it('unlock rejects a wrong passphrase', async () => {
 		await expect(unlock('wrong passphrase x', deps)).rejects.toThrow(WrongPassphraseError);
 		expect(session.status).toBe('locked');
 	});
 
-	it('unlock opens the manifest stored at setup', step, async () => {
+	it('unlock opens the manifest stored at setup', async () => {
 		await unlock(p1, deps);
 
 		expect(session.status).toBe('unlocked');
@@ -151,7 +143,7 @@ live('account flows against a live server', () => {
 		expect(session.manifest?.body.settings.ownAddresses).toEqual(addresses);
 	});
 
-	it('changePassphrase keeps this session and retires the old passphrase', step, async () => {
+	it('changePassphrase keeps this session and retires the old passphrase', async () => {
 		const etag = session.manifest?.etag;
 
 		await changePassphrase(p1, p2, deps);
@@ -169,7 +161,7 @@ live('account flows against a live server', () => {
 		expect(session.dek).toEqual(dek);
 	});
 
-	it('regenerateRecoveryKey returns a different phrase', step, async () => {
+	it('regenerateRecoveryKey returns a different phrase', async () => {
 		({ recoveryPhrase: phrase2 } = await regenerateRecoveryKey(p2, deps));
 
 		expect(phrase2.split(' ')).toHaveLength(24);
@@ -177,7 +169,7 @@ live('account flows against a live server', () => {
 		expect(session.status).toBe('unlocked');
 	});
 
-	it('recover rejects the retired phrase and accepts the current one', step, async () => {
+	it('recover rejects the retired phrase and accepts the current one', async () => {
 		await lock(deps);
 
 		await expect(recover(phrase1, p3, deps)).rejects.toThrow(WrongRecoveryKeyError);
@@ -190,7 +182,7 @@ live('account flows against a live server', () => {
 		expect(session.dek).toEqual(dek);
 	});
 
-	it('the passphrase set by recover unlocks', step, async () => {
+	it('the passphrase set by recover unlocks', async () => {
 		await lock(deps);
 		await unlock(p3, deps);
 

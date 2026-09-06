@@ -114,11 +114,16 @@ Things the account layer cannot handle on its own and the screens must.
 - **Setup that succeeds without showing the phrase.** `createAccount` sends
   the account and manifest in one request; if the login or manifest fetch
   right after it fails, the account exists and the passphrase unlocks it, but
-  the recovery phrase was never displayed. Create account should catch that
-  case, tell the user the account was created, send them to Unlock, and
-  prompt them to generate a recovery key from Settings once inside.
-- **The Argon2id worker is only bundled once a route imports it.** Nothing in
-  the library slice reaches `deriveRootInWorker` from a page, so the build
-  emits no worker chunk yet. The first screen that unlocks or creates an
-  account should confirm a worker file appears in `web/build` and that the
-  derivation runs off the main thread.
+  the recovery phrase was never displayed. `createAccount` reports this as
+  `SetupUnfinishedError`; Create account tells the user the account was
+  created, links to Unlock and says to generate a recovery key from Settings.
+  Covered by `web/tests/e2e/setup-unfinished.spec.ts`.
+- **The recovery phrase lives in memory between two screens.** Create account
+  leaves it in `state/onboarding.svelte.ts`; Recovery key shows it and
+  forgets it on Continue. After a reload the phrase is gone while the session
+  resumes, so Recovery key then says the key cannot be shown again and points
+  to Settings instead of pretending.
+- **The Argon2id worker is only bundled once a route imports it.** Create
+  account reaches `deriveRootInWorker` through the account layer, so the
+  build emits `_app/immutable/workers/kdf.worker-*.js`; the onboarding spec
+  asserts a worker with that name starts when Continue is pressed.

@@ -28,3 +28,7 @@ web/vite.config.ts.timestamp-*
 .DS_Store
 .idea/
 .vscode/
+
+# Playwright
+web/test-results/
+web/playwright-report/

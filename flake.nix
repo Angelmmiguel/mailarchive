@@ -25,6 +25,9 @@
         # SvelteKit frontend
         nodejs_22
         pnpm
+        # Browsers for the Playwright e2e. @playwright/test in web/package.json
+        # must be the exact version of playwright-driver here.
+        playwright-driver.browsers
 
         # Misc
         just
@@ -37,6 +40,8 @@
         export GOMODCACHE="$GOPATH/pkg/mod"
         export GOCACHE="$GOPATH/cache"
         export PATH="$GOPATH/bin:$PATH"
+        export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+        export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 
         # Load project env files: .env for shared vars (checked in),
         # .env.local for private overrides (gitignored).

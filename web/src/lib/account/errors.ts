@@ -132,3 +132,15 @@ function translate(e: unknown): unknown {
 	}
 	return e.status === 401 ? new SessionExpiredError() : e;
 }
+
+/**
+ * Setup stored the account, but logging in or opening the manifest right
+ * after it failed, so the recovery phrase was never produced. The passphrase
+ * unlocks the account; a recovery key has to be generated from Settings.
+ */
+export class SetupUnfinishedError extends Error {
+	constructor(cause: unknown) {
+		super('the account was created but could not be opened', { cause });
+		this.name = 'SetupUnfinishedError';
+	}
+}

@@ -22,7 +22,8 @@ import {
 	AlreadySetUpError,
 	MissingManifestError,
 	RateLimitedError,
-	ServerUnreachableError
+	ServerUnreachableError,
+	SetupUnfinishedError
 } from './errors';
 import { createAccount } from './setup';
 
@@ -167,14 +168,14 @@ describe('createAccount', () => {
 	});
 
 	// Setup is atomic on the server, so a failure after it is not a
-	// half-made account: it is reported as what it is, and the passphrase
-	// unlocks the account that now exists.
-	it('passes a failure after setup through unchanged', async () => {
+	// half-made account: the passphrase unlocks the account that now exists,
+	// only the recovery phrase was never produced.
+	it('reports a failure after setup as an unfinished setup, keeping the cause', async () => {
 		api.login.mockRejectedValue(new TypeError('fetch failed'));
 
-		await expect(createAccount(PASSPHRASE, [], tinyDeps(api))).rejects.toThrow(
-			ServerUnreachableError
-		);
+		const failure = createAccount(PASSPHRASE, [], tinyDeps(api));
+		await expect(failure).rejects.toThrow(SetupUnfinishedError);
+		await expect(failure).rejects.toHaveProperty('cause', expect.any(ServerUnreachableError));
 		expect(callOrder(api)).toEqual(['setup', 'login']);
 		expect(session.status).toBe('locked');
 		expect(storage.getItem(STORAGE_KEY)).toBeNull();
@@ -185,9 +186,9 @@ describe('createAccount', () => {
 			api.getManifest.mockResolvedValue(null);
 		});
 
-		await expect(createAccount(PASSPHRASE, [], tinyDeps(api))).rejects.toThrow(
-			MissingManifestError
-		);
+		const failure = createAccount(PASSPHRASE, [], tinyDeps(api));
+		await expect(failure).rejects.toThrow(SetupUnfinishedError);
+		await expect(failure).rejects.toHaveProperty('cause', expect.any(MissingManifestError));
 		expect(session.status).toBe('locked');
 	});
 
@@ -197,7 +198,9 @@ describe('createAccount', () => {
 			api.getManifest.mockResolvedValue({ data: other.manifest, etag: '"other"' });
 		});
 
-		await expect(createAccount(PASSPHRASE, [], tinyDeps(api))).rejects.toThrow(SealError);
+		const failure = createAccount(PASSPHRASE, [], tinyDeps(api));
+		await expect(failure).rejects.toThrow(SetupUnfinishedError);
+		await expect(failure).rejects.toHaveProperty('cause', expect.any(SealError));
 		expect(session.status).toBe('locked');
 		expect(storage.getItem(STORAGE_KEY)).toBeNull();
 	});

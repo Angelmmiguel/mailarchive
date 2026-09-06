@@ -1,15 +1,54 @@
+/*
+ * Global styles: the fonts, the tokens and a small reset. Everything visual
+ * beyond this lives in components.
+ */
+@import '@fontsource/geist-mono/400.css';
+@import '@fontsource/geist-mono/500.css';
+@import '@fontsource/source-sans-3/400.css';
+@import '@fontsource/source-sans-3/400-italic.css';
+@import '@fontsource/source-sans-3/600.css';
+@import './tokens.css';
+
 *,
 *::before,
 *::after {
 	box-sizing: border-box;
 }
 
-:root {
-	color-scheme: light dark;
-	font-family: system-ui, sans-serif;
-	line-height: 1.5;
+html {
+	height: 100%;
 }
 
 body {
 	margin: 0;
+	min-height: 100%;
+	background: var(--surface-page);
+	color: var(--text-body);
+	font-family: var(--font-body);
+	font-size: var(--body-md);
+	line-height: var(--body-leading);
+	-webkit-font-smoothing: antialiased;
+}
+
+::selection {
+	background: var(--selection);
+}
+
+a {
+	color: var(--accent-ink);
+}
+
+a:hover {
+	color: var(--text-body);
+}
+
+:focus-visible {
+	outline: none;
+	box-shadow: var(--focus-ring);
+}
+
+button,
+input {
+	font: inherit;
+	color: inherit;
 }

@@ -62,20 +62,14 @@ web-check:
 web-test:
     pnpm test
 
-# End-to-end account flows against a throwaway Go server on 127.0.0.1:18100.
-# The binary is built first so that the server, not `go run`, is what gets
-# killed on exit and the health poll never waits on the compiler. The login
-# rate limit is raised so the scenario never waits for a window to pass.
-web-e2e:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tmp=$(mktemp -d)
-    trap '[ -n "${server:-}" ] && kill "$server"; rm -rf "$tmp"' EXIT
-    go build -o "$tmp/mailarchive" ./cmd/mailarchive
-    "$tmp/mailarchive" serve --addr 127.0.0.1:18100 --data "$tmp/data" --login-attempts 1000 &
-    server=$!
-    for i in $(seq 1 50); do curl -sf 127.0.0.1:18100/api/health >/dev/null && break; sleep 0.2; done
-    cd web && MAILARCHIVE_E2E=http://127.0.0.1:18100 pnpm vitest run src/lib/account/e2e.test.ts
+# End-to-end tests: the account flows in vitest, then the Playwright specs
+# in a real browser against the built app the binary embeds. Each file starts
+# its own throwaway Go server over a temporary data directory (web/tests/
+# server.ts), so nothing here depends on a port or a data path. The browsers
+# come from the flake (PLAYWRIGHT_BROWSERS_PATH).
+[working-directory('web')]
+web-e2e: web-build
+    pnpm test:e2e
 
 # Compile the app into web/build, where the Go binary embeds it from. The
 # build script recreates build/.gitkeep afterwards: adapter-static wipes the

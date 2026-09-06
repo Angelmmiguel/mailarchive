@@ -7,3 +7,5 @@ pnpm-lock.yaml
 
 # Miscellaneous
 /static/
+test-results/
+playwright-report/

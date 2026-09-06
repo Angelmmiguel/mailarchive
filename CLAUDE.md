@@ -22,7 +22,12 @@ those. Routine work does not need it.
   lives in `.svelte.ts` modules under `src/lib/state`, exported as class
   instances or objects whose properties are `$state`. The API client in
   `src/lib/api` mirrors the Go routes one to one and knows nothing about
-  crypto. When unsure about Svelte 5 idioms, check https://svelte.dev/docs.
+  crypto. Visual language comes from `src/lib/styles/tokens.css` (primitives
+  and a semantic layer; a theme overrides only the semantic layer) and the
+  component library in `src/lib/components`: components draw the styleguide
+  and own their own interactions, routes are glue that composes them and
+  calls the account layer, never business logic of their own. When unsure
+  about Svelte 5 idioms, check https://svelte.dev/docs.
   The Content-Security-Policy is authored in `svelte.config.js` and delivered
   as a header by the Go handler, which reads it from the built `index.html`.
 - **Toolchain:** Nix flake. Run commands inside `nix develop` (or direnv).
@@ -34,11 +39,15 @@ just test    # go test -race ./... and vitest
 just lint    # go vet, golangci-lint, svelte-check, eslint, prettier
 just dev     # Go server on :8080 and Vite on :5173 together
 just build   # pnpm build, then go build with the web app embedded
+just web-e2e # account flows and the Playwright specs against throwaway servers
 ```
 
 `just test` and `just lint` must be clean before work is considered done,
-along with `gofmt -l .` printing nothing. Web-only variants exist as
-`web-install`, `web-dev`, `web-check`, `web-test` and `web-build`.
+along with `gofmt -l .` printing nothing; run `just web-e2e` when a change
+touches a screen or an account flow. Browser specs live in `web/tests/e2e`,
+one file per scenario that needs a never-set-up server; the browsers come from
+the flake, so `@playwright/test` must match `playwright-driver` in nixpkgs.
+Web-only variants exist as `web-install`, `web-dev`, `web-check`, `web-test` and `web-build`.
 
 ## Conventions
 

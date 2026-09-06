@@ -1,0 +1,103 @@
+/*
+ * Design tokens, from the styleguide (Claude Design project "Email Archive").
+ *
+ * Two layers. Primitives (`--n-*`, `--amber*`, `--green*`, `--red*`, the
+ * scales) are the palette and never appear in a component. Semantic tokens
+ * (`--surface-*`, `--text-*`, `--border*`, `--accent*`, `--ok*`, `--danger*`)
+ * are what components use. A theme is a second block that reassigns only the
+ * semantic layer, for example `:root[data-theme='dark'] { --surface-page: … }`
+ * together with `color-scheme: dark`; nothing in a component changes.
+ */
+:root {
+	color-scheme: light;
+
+	/* Primitives: cool neutrals, chroma at or below 0.012. */
+	--n-0: oklch(0.985 0.004 240);
+	--n-1: oklch(0.965 0.005 240);
+	--n-2: oklch(0.935 0.006 240);
+	--n-3: oklch(0.895 0.007 240);
+	--n-4: oklch(0.8 0.009 240);
+	--n-5: oklch(0.62 0.01 240);
+	--n-6: oklch(0.45 0.012 240);
+	--n-7: oklch(0.3 0.012 240);
+	--n-8: oklch(0.2 0.012 240);
+
+	/* Primitives: accents share lightness and chroma, only the hue varies. */
+	--amber: oklch(0.72 0.13 55);
+	--amber-ink: oklch(0.46 0.11 55);
+	--amber-soft: oklch(0.95 0.035 55);
+	--green: oklch(0.72 0.13 145);
+	--green-ink: oklch(0.44 0.1 145);
+	--green-soft: oklch(0.95 0.035 145);
+	--red: oklch(0.72 0.13 25);
+	--red-ink: oklch(0.48 0.13 25);
+	--red-soft: oklch(0.95 0.03 25);
+
+	/* Semantic: surfaces and text. */
+	--surface-page: var(--n-0);
+	--surface-panel: var(--n-1);
+	--surface-inset: var(--n-2);
+	--surface-ink: var(--n-8);
+	--text-body: var(--n-8);
+	--text-muted: var(--n-6);
+	--text-faint: var(--n-5);
+	--text-on-ink: var(--n-0);
+	--text-on-accent: var(--n-8);
+	--border: var(--n-3);
+	--border-strong: var(--n-4);
+	--border-focus: var(--n-8);
+
+	/* Semantic: amber is the only accent; green and red are meaning only. */
+	--accent: var(--amber);
+	--accent-ink: var(--amber-ink);
+	--accent-soft: var(--amber-soft);
+	--ok: var(--green);
+	--ok-ink: var(--green-ink);
+	--ok-soft: var(--green-soft);
+	--danger: var(--red);
+	--danger-ink: var(--red-ink);
+	--danger-soft: var(--red-soft);
+	--focus-ring: 0 0 0 2px var(--surface-page), 0 0 0 4px var(--accent);
+	--selection: var(--amber-soft);
+	--shadow-pop: 0 4px 16px oklch(0.2 0.01 240 / 0.1), 0 0 0 1px var(--border);
+
+	/* Type. Mono carries identifiers, time, size, keys; the body face carries language. */
+	--font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--font-body: 'Source Sans 3', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+	--mono-xs: 10px;
+	--mono-sm: 11px;
+	--mono-md: 12px;
+	--mono-lg: 14px;
+	--mono-xl: 18px;
+	--mono-2xl: 24px;
+	--mono-tracking: 0.06em;
+	--mono-tracking-tight: 0.04em;
+	--mono-leading: 1.4;
+	--body-sm: 13px;
+	--body-md: 15px;
+	--body-lg: 17px;
+	--body-xl: 22px;
+	--body-leading: 1.5;
+	--reading-leading: 1.65;
+	--reading-measure: 68ch;
+
+	/* Space on a 4px base. */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 32px;
+	--space-7: 48px;
+	--space-8: 64px;
+
+	/* Shape. Flat surfaces, hairlines instead of shadows. */
+	--radius-sm: 3px;
+	--radius-md: 6px;
+	--radius-none: 0;
+	--row-h: 40px;
+	--row-h-lg: 56px;
+	--control-h: 32px;
+	--control-h-sm: 26px;
+	--hairline: 1px solid var(--border);
+}

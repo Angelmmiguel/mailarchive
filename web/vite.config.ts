@@ -20,7 +20,27 @@ export default defineConfig({
 	},
 	test: {
 		environment: 'node',
-		include: ['src/**/*.{test,spec}.{js,ts}'],
-		expect: { requireAssertions: true }
+		expect: { requireAssertions: true },
+		// `pnpm test` runs the unit project; `pnpm test:e2e` runs the account
+		// flows against a throwaway Go server started by tests/vitest-server.ts.
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: 'unit',
+					include: ['src/**/*.{test,spec}.{js,ts}'],
+					exclude: ['**/e2e.test.ts']
+				}
+			},
+			{
+				extends: true,
+				test: {
+					name: 'e2e',
+					include: ['src/**/e2e.test.ts'],
+					globalSetup: ['tests/vitest-server.ts'],
+					testTimeout: 30_000
+				}
+			}
+		]
 	}
 });
