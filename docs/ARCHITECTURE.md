@@ -109,39 +109,109 @@ document rather than in the immutable segments.
 
 ## Cryptography
 
-Key hierarchy, all derived and held in the browser:
+Key hierarchy, all derived and held in the browser. HKDF labels are the
+literal strings shown; every key is 32 bytes.
 
 ```
-passphrase ──Argon2id──► KEK (passphrase)  ─┐
-                                            ├──wraps──► DEK (random 256-bit)
-recovery key (random, shown once) ──────────┘              │
-                                                           ├─► blob encryption key
-passphrase ──Argon2id, separate salt──► auth key           ├─► id (HMAC) key
-                                        (sent to server)   └─► local cache key
+passphrase, NFKC-normalised
+  └─ Argon2id(salt, m=64 MiB, t=3, p=1) ─► root
+       ├─ HKDF(root, "mailarchive/kek/v1")  ─► KEK            never leaves the browser
+       └─ HKDF(root, "mailarchive/auth/v1") ─► auth key       sent to the server
+
+recovery key, 32 random bytes, shown once as 24 BIP39 words
+  ├─ HKDF(rk, "mailarchive/kek/v1")  ─► recovery KEK
+  └─ HKDF(rk, "mailarchive/auth/v1") ─► recovery auth key     sent to the server
+
+DEK, 32 random bytes, protects the whole archive
+  ├─ wrapped under KEK            AAD "mailarchive/dek/passphrase/v1"
+  ├─ wrapped under recovery KEK   AAD "mailarchive/dek/recovery/v1"
+  ├─ wrapped under session key    AAD "mailarchive/dek/session/v1", see below
+  ├─ HKDF(dek, "mailarchive/blob/v1")     ─► blob key
+  ├─ HKDF(dek, "mailarchive/id/v1")       ─► id (HMAC) key
+  ├─ HKDF(dek, "mailarchive/manifest/v1") ─► manifest body key
+  └─ HKDF(dek, "mailarchive/cache/v1")    ─► local cache key
 ```
 
-- **DEK** is random and is what actually protects the archive. It is wrapped
-  twice, once by the passphrase KEK and once by the recovery key. Changing the
-  passphrase rewraps the DEK; nothing else is re-encrypted.
-- **Recovery key** is a random 256-bit value shown once at setup, for the user
-  to store offline. Losing both passphrase and recovery key loses the archive.
-  There is no server-side reset by design.
-- **Auth key** is derived from the same passphrase with a different salt and
-  domain tag, 32 bytes sent to the server as standard base64. The server
-  stores only its SHA-256 and compares in constant time; a slow hash would add
-  nothing on top of an Argon2id output with 256 bits of entropy. One
-  passphrase, and the server still never learns the encryption keys.
-- **Blob encryption** is XChaCha20-Poly1305 with a random nonce per blob. The
-  blob id is passed as additional authenticated data so the server cannot swap
-  one blob for another. Segment indexes, term shards and the manifest are
-  encrypted the same way.
+- **Argon2id** is the one deliberately slow step, run once per unlock in a
+  Web Worker. The salt is 16 random bytes and is public: it makes precomputed
+  tables useless, and on its own gives an attacker nothing to test guesses
+  against. The parameters are stored, not hardcoded, so they can be raised
+  later through a rekey.
+- **HKDF** splits one strong key into independent purpose-bound keys. It is
+  one-way, so a server that learns the auth key learns nothing about the KEK,
+  and one key per purpose keeps a flaw in any component from reaching the
+  others.
+- **DEK** is random and is what actually protects the archive. Changing the
+  passphrase or the recovery key rewraps the DEK; nothing else is
+  re-encrypted.
+- **Recovery key** is 32 random bytes generated at setup and shown once as 24
+  English words (BIP39 encoding, used only for its checksum and wordlist,
+  never for seed derivation). It needs no Argon2id: a random 256-bit key
+  cannot be guessed. Its auth key lets a user who lost the passphrase still
+  log in and fetch the manifest. Losing both passphrase and recovery key
+  loses the archive; there is no server-side reset by design.
+- **Auth keys** are 32 bytes sent as standard base64. The server stores only
+  their SHA-256 and compares in constant time; a slow hash would add nothing
+  on top of 256 bits of entropy. Login accepts either the passphrase or the
+  recovery auth key.
+- **Sealing** is XChaCha20-Poly1305. Wire format: one version byte `0x01`,
+  a 24-byte random nonce, then ciphertext with the 16-byte tag. Blobs use
+  their id as additional authenticated data so the server cannot serve one
+  blob under another id; wrapped DEKs and the manifest body use the AAD
+  strings above.
 - **Ids** are `HMAC-SHA256(id key, SHA-256(plaintext))` for blobs and
   `HMAC-SHA256(id key, prefix)` for term shards. Deterministic, so identical
   messages deduplicate, but meaningless without the id key.
 - **Cache key** encrypts the local IndexedDB cache. It derives from the DEK, so
-  the cache is unreadable without unlocking and becomes useless if the
-  archive keys are ever rotated.
-- Salts, Argon2 parameters and the wrapped DEKs live in the manifest.
+  the cache is unreadable without unlocking.
+
+### Manifest layout
+
+Two layers, so the wrapped DEKs can be read before the DEK is known:
+
+```
+{
+  "version": 1,
+  "kdf":     { "name": "argon2id", "m": 65536, "t": 3, "p": 1, "salt": "<base64>" },
+  "wrapped": { "passphrase": "<base64 sealed DEK>", "recovery": "<base64 sealed DEK>" },
+  "body":    "<base64, sealed under the manifest key>"
+}
+
+body, once opened: { "settings": { "ownAddresses": [] }, "segments": [] }
+```
+
+The KDF parameters are also stored on the server, because unlock needs them
+before it can log in (see the API). The manifest copy keeps a backup
+self-describing.
+
+### Keys in the browser
+
+- While unlocked, the usable keys (DEK and its subkeys) exist only in memory
+  and are zeroed on lock. The only key material that touches disk is the
+  ciphertext described next, whose decryption key is not on that disk.
+- **Surviving a page refresh** uses a split session key. The browser generates
+  32 random bytes, hands them to the server, which keeps them in memory on the
+  session record, and stores the DEK *encrypted* under them in sessionStorage.
+  On load, the browser fetches the session key back with its cookie and
+  unwraps the DEK without the passphrase. A stolen server holds a session key
+  and no ciphertext; a stolen disk holds ciphertext and no session key. Lock,
+  logout or session expiry deletes the server half, which turns the stored
+  ciphertext into random bytes.
+- The DEK itself is never placed in sessionStorage or IndexedDB: browsers
+  persist both to disk.
+- Randomness comes only from `crypto.getRandomValues`. The app refuses to run
+  without it and warns in an insecure context other than localhost.
+- Idle auto-lock is a future setting: a timer that calls lock.
+
+### Libraries
+
+`@noble/hashes` (Argon2id, HKDF, HMAC, SHA-256), `@noble/ciphers`
+(XChaCha20-Poly1305), `@scure/base` (base64) and `@scure/bip39` (recovery
+words). One audited, dependency-free family, pure JavaScript, so no
+WebAssembly and no CSP change. Versions are pinned exactly, installs run with
+`--frozen-lockfile`, dependency install scripts are disabled, and pnpm's
+minimum release age keeps a freshly published version out for seven days.
+Known-answer tests from the RFCs cover our wiring of each primitive.
 
 Known leakage to the server: number and sizes of blobs, segments and shards,
 and upload timing. Because the client fetches all shards once and caches them,
@@ -191,16 +261,45 @@ Any browser with the URL and passphrase gets the same experience. First unlock
 on a new device pays one download of the index and shards, later unlocks are
 instant.
 
+### Account flows
+
+- **Setup.** Generate DEK, recovery key and salt. Derive the root in the
+  worker, expand both KEKs and both auth keys, wrap the DEK twice. Register
+  with the server (both auth keys and the KDF parameters), log in, upload the
+  manifest, persist the session key, show the 24 words.
+- **Unlock.** Fetch the KDF parameters, derive, log in. A wrong passphrase
+  stops here, so the manifest is never fetched with a bad key. Fetch the
+  manifest, unwrap the DEK, derive subkeys, persist the session key.
+- **Resume** (page load). If sessionStorage holds a wrapped DEK, fetch the
+  session key; a 401 means the session is gone, so clear the blob and show
+  Unlock. Otherwise unwrap and continue without the passphrase.
+- **Lock.** Log out, which deletes the server half of the session key. Clear
+  sessionStorage, zero every key.
+- **Recover.** Parse the words, derive the recovery KEK and auth key, log in
+  with it, unwrap the DEK under the recovery KEK, then rekey with a new
+  passphrase and a fresh recovery key.
+- **Rekey** (passphrase change, recovery key change, parameter change). New
+  salt or new recovery key, rewrap the DEK, rebuild the manifest header, and
+  send the changed credentials and the new manifest in one call under the
+  manifest's ETag. One call matters: two separate requests could leave a
+  state where one passphrase logs in and the other decrypts. With one, a
+  failure leaves the old passphrase fully working and the change is retried.
+
 ## Server API
 
-Deliberately small. Every route except health, setup and login requires a
-session. Errors are JSON `{"error":"<code>"}` with a stable code and no detail.
+Deliberately small. Every route except health, kdf, setup and login requires
+a session. Errors are JSON `{"error":"<code>"}` with a stable code and no
+detail.
 
 ```
 GET    /api/health                    liveness and whether the archive is set up
-POST   /api/setup                     auth key → creates the single account
-POST   /api/login                     auth key → session cookie
+GET    /api/kdf                       KDF parameters and salt, needed before login
+POST   /api/setup                     both auth keys + kdf → creates the single account
+POST   /api/login                     either auth key → session cookie
 POST   /api/logout
+POST   /api/rekey                     new credentials and/or kdf + new manifest, atomically
+PUT    /api/session/key               32 bytes kept in memory on the session
+GET    /api/session/key
 GET    /api/manifest                  returns ciphertext + ETag
 PUT    /api/manifest                  If-Match required once a manifest exists (428/412)
 HEAD   /api/blobs/<id>                existence check
@@ -215,6 +314,14 @@ GET    /api/blobs                     listing, for garbage collection
   becomes the only account, and the route is refused forever after. There is
   no setup token: an empty archive belongs to whoever reaches it first, which
   on a private network is the operator.
+- **Credentials.** The server holds the SHA-256 of the passphrase auth key,
+  the SHA-256 of the recovery auth key, and the KDF parameters as an opaque,
+  size-bounded JSON value it serves verbatim. Login checks both hashes
+  without short-circuiting. Rekey replaces the file atomically after the
+  manifest write under `If-Match` has succeeded.
+- **Session key.** Set by the client after unlock, stored only in memory on
+  the session record, never on disk, and gone with logout or expiry. Setting
+  it again replaces it.
 - **Blob ids** are 64 lowercase hex characters and are validated before any
   path is built. Everything else is rejected, which is the path-traversal
   boundary of the server.
