@@ -9,18 +9,29 @@
 		step: number;
 		total?: number;
 		title: string;
+		/** Hide the step counter on a screen that is not part of a sequence. */
+		counter?: boolean;
 		width?: 'narrow' | 'wide';
 		lead?: Snippet;
 		notice?: Snippet;
 		children: Snippet;
 	}
 
-	let { step, total = 3, title, width = 'narrow', lead, notice, children }: Props = $props();
+	let {
+		step,
+		total = 3,
+		title,
+		counter = true,
+		width = 'narrow',
+		lead,
+		notice,
+		children
+	}: Props = $props();
 </script>
 
 <section class="step {width}" aria-labelledby="step-title">
 	<header>
-		<span class="counter">Step {step} of {total}</span>
+		{#if counter}<span class="counter">Step {step} of {total}</span>{/if}
 		<h1 id="step-title">{title}</h1>
 		{#if lead}<p class="lead">{@render lead()}</p>{/if}
 	</header>

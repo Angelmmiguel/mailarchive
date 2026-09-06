@@ -1,48 +1,59 @@
 <!--
-  The archive. Until the reading views land this only routes: a server with
-  no account goes to onboarding, everything else sees where it stands.
+  The archive. Health decides where a visitor belongs: no account goes to
+  Create account, a locked archive to Unlock. What remains is the reading
+  view, which for now knows only the empty state; the list arrives with the
+  index.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { Button, Code, EmptyState } from '$lib/components';
 	import { archive } from '$lib/state/archive.svelte';
 	import { session } from '$lib/state/session.svelte';
 
+	const messages = $derived(
+		session.manifest?.body.segments.reduce((sum, s) => sum + s.messages, 0) ?? 0
+	);
+
 	$effect(() => {
-		if (archive.health !== null && !archive.health.setup) void goto(resolve('/setup'));
+		if (session.status === 'unlocked' || archive.health === null) return;
+		if (!archive.health.setup) void goto(resolve('/setup'), { replaceState: true });
+		else void goto(resolve('/unlock'), { replaceState: true });
 	});
 </script>
 
-<section class="placeholder">
-	{#if archive.error !== null}
-		<p>The archive is unreachable.</p>
-	{:else if archive.health === null}
-		<p>Loading…</p>
-	{:else if session.status === 'unlocked'}
-		<h1>Archive</h1>
-		<p data-testid="archive-status">
-			{#if session.manifest?.body.segments.length === 0}
-				The archive is empty. Import will land here.
-			{:else}
-				The archive is ready.
-			{/if}
-		</p>
-	{:else if archive.health.setup}
-		<p>The archive is locked. <a href={resolve('/unlock')}>Unlock</a></p>
+<svelte:head><title>Archive · mailarchive</title></svelte:head>
+
+{#if session.status === 'unlocked'}
+	{#if messages === 0}
+		<EmptyState eyebrow="0 messages" title="The archive is empty">
+			Import <Code>.eml</Code> files from a folder or drop them anywhere on this page. Everything is encrypted
+			before it leaves this device.
+			{#snippet actions()}
+				<Button disabled>Import messages</Button>
+				<span class="aside">Import is not available yet</span>
+			{/snippet}
+		</EmptyState>
+	{:else}
+		<EmptyState eyebrow="{messages.toLocaleString()} messages" title="The archive is ready">
+			The list of threads arrives with the index.
+		</EmptyState>
 	{/if}
-</section>
+{:else if archive.error !== null}
+	<p class="status">The archive is unreachable.</p>
+{:else}
+	<p class="status">Loading…</p>
+{/if}
 
 <style>
-	.placeholder {
+	.status {
 		margin: auto;
-		max-width: 440px;
-		width: 100%;
+		font: var(--body-md) / var(--body-leading) var(--font-body);
 		color: var(--text-muted);
 	}
 
-	h1 {
-		margin: 0 0 var(--space-2);
-		font: 500 var(--mono-2xl) / 1.2 var(--font-mono);
-		color: var(--text-body);
+	.aside {
+		font: var(--mono-xs) / var(--mono-leading) var(--font-mono);
+		color: var(--text-faint);
 	}
 </style>

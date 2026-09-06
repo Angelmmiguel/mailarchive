@@ -127,3 +127,19 @@ Things the account layer cannot handle on its own and the screens must.
   account reaches `deriveRootInWorker` through the account layer, so the
   build emits `_app/immutable/workers/kdf.worker-*.js`; the onboarding spec
   asserts a worker with that name starts when Continue is pressed.
+- **Unlock knows why it was reached and where to return.** The reason
+  (`already-set-up`, `expired`) and the location (`next`) travel in the
+  query string so that both survive a reload. `returnPath` in
+  `lib/app/navigation.ts` accepts only a path inside the app, so a crafted
+  link cannot send a freshly unlocked user to another origin. Lock builds the
+  URL with `unlockUrl` from the current location.
+- **Health goes stale after Create account.** The shell reads
+  `GET /api/health` once per page load, before the account exists, so Create
+  account marks the archive as set up itself once the flow moves on. Screens
+  that redirect check for an open session before they look at health.
+- **Not yet built.** The decrypting-index progress after a correct
+  passphrase (there is no index to decrypt), the attempts-left count in the
+  wrong-passphrase message (the server does not report it; the rate-limited
+  message asks to wait a minute, the default window), the no-results state
+  of Archive (it belongs to the list), and Import, whose button the empty
+  archive shows disabled. Recover is a placeholder that Unlock links to.

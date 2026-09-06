@@ -2,7 +2,8 @@
   Create account, step 1 of onboarding. Collects the passphrase, calls
   `createAccount` and hands the recovery phrase to the next screen. A server
   that already has its account belongs to Unlock, which says why it was
-  reached; the same happens when the server reports it at submit.
+  reached, or to the archive when the session is already open; the same
+  happens when the server reports it at submit.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
@@ -18,6 +19,7 @@
 	import { Button, Field, Notice, PassphraseField, Step } from '$lib/components';
 	import { archive } from '$lib/state/archive.svelte';
 	import { onboarding } from '$lib/state/onboarding.svelte';
+	import { session } from '$lib/state/session.svelte';
 
 	let passphrase = $state('');
 	let confirmation = $state('');
@@ -36,7 +38,8 @@
 	const unlock = `${resolve('/unlock')}?reason=already-set-up` as ResolvedPathname;
 
 	$effect(() => {
-		if (alreadySetUp) void goto(unlock, { replaceState: true });
+		if (session.status === 'unlocked') void goto(resolve('/'), { replaceState: true });
+		else if (alreadySetUp) void goto(unlock, { replaceState: true });
 	});
 
 	async function submit(event: SubmitEvent): Promise<void> {
@@ -50,6 +53,9 @@
 			passphrase = '';
 			confirmation = '';
 			await goto(resolve('/setup/recovery'));
+			// Health was read before the account existed; the screens after this
+			// one decide from it, so tell them without another round trip.
+			archive.health = { status: 'ok', setup: true };
 		} catch (e) {
 			if (e instanceof AlreadySetUpError) {
 				await archive.refresh();

@@ -115,7 +115,7 @@ test('the recovery key is not shown a second time', async () => {
 test('Skip for now opens the empty archive', async () => {
 	await page.getByRole('button', { name: 'Skip for now' }).click();
 	await expect(page).toHaveURL(/\/$/);
-	await expect(page.getByTestId('archive-status')).toHaveText(/The archive is empty/);
+	await expect(page.getByRole('heading', { name: 'The archive is empty' })).toBeVisible();
 });
 
 test('addresses are validated, deduplicated and removable', async () => {
@@ -143,17 +143,22 @@ test('Open archive keeps a typed address and stores the list in the manifest', a
 	await page.getByLabel('Email address').fill('me@example.org');
 	await page.getByRole('button', { name: 'Open archive' }).click();
 	await expect(page).toHaveURL(/\/$/);
-	await expect(page.getByTestId('archive-status')).toHaveText(/The archive is empty/);
+	await expect(page.getByRole('heading', { name: 'The archive is empty' })).toBeVisible();
 
 	// A reload resumes the session without the passphrase, and the list is
 	// read back from the manifest the server holds.
 	await page.reload();
-	await expect(page.getByTestId('archive-status')).toHaveText(/The archive is empty/);
+	await expect(page.getByRole('heading', { name: 'The archive is empty' })).toBeVisible();
 	await page.goto('/setup/addresses');
 	await expect(page.getByTestId('address')).toHaveText(['maren@okafor.io', 'me@example.org']);
 });
 
 test('Create account on a server that is set up goes to Unlock and says why', async () => {
+	await page.goto('/setup');
+	await expect(page).toHaveURL(/\/$/);
+	await page.getByRole('button', { name: 'Lock' }).click();
+	await expect(page).toHaveURL(/\/unlock$/);
+
 	await page.goto('/setup');
 	await expect(page).toHaveURL(/\/unlock\?reason=already-set-up$/);
 	await expect(page.getByRole('alert')).toContainText('already set up');

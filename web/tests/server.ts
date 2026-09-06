@@ -73,9 +73,10 @@ async function waitForHealth(url: string, child: ChildProcess): Promise<void> {
 
 /**
  * Starts a fresh server, or points at MAILARCHIVE_E2E when set. The login
- * rate limit is raised so no scenario waits for a window to pass.
+ * rate limit is raised so no scenario waits for a window to pass, unless a
+ * scenario asks for a limit of its own to test what hitting it looks like.
  */
-export async function startServer(): Promise<Server> {
+export async function startServer({ loginAttempts = 1000 } = {}): Promise<Server> {
 	const external = process.env.MAILARCHIVE_E2E;
 	if (external !== undefined && external !== '') {
 		return { url: external, stop: () => Promise.resolve() };
@@ -86,7 +87,15 @@ export async function startServer(): Promise<Server> {
 	const url = `http://127.0.0.1:${port}`;
 	const child = spawn(
 		bin,
-		['serve', '--addr', `127.0.0.1:${port}`, '--data', data, '--login-attempts', '1000'],
+		[
+			'serve',
+			'--addr',
+			`127.0.0.1:${port}`,
+			'--data',
+			data,
+			'--login-attempts',
+			String(loginAttempts)
+		],
 		{ stdio: ['ignore', 'ignore', 'ignore'] }
 	);
 	const stop = async (): Promise<void> => {
