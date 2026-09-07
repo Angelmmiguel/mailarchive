@@ -21,7 +21,9 @@ const config = {
 				'default-src': ['self'],
 				'script-src': ['self'],
 				'style-src': ['self', 'unsafe-inline'],
-				'img-src': ['self', 'data:', 'blob:'],
+				// https: only reaches an image when the reader asks to load them;
+				// the sanitizer drops every image source otherwise.
+				'img-src': ['self', 'data:', 'blob:', 'https:'],
 				'connect-src': ['self'],
 				'worker-src': ['self', 'blob:'],
 				'object-src': ['none'],

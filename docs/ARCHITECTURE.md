@@ -267,11 +267,27 @@ against the server listing.
    and shards, decrypt, merge into memory, and write the merged result back to
    the cache encrypted under the cache key.
 3. List and thread views render from memory. Opening a message fetches and
-   decrypts its view blob. View and raw blobs are also cached as ciphertext.
+   decrypts its view blob; a few dozen opened views are kept in memory until
+   lock. View and raw blobs are also cached as ciphertext.
+   The address of a thread is `HMAC-SHA256(id key, "thread/<thread id>")`,
+   so a reload on `/t/<key>` sends the server an opaque name rather than a
+   Message-ID, and the same link works on every device.
+   HTML bodies are sanitized at render (DOMPurify, links forced to a new tab
+   without referrer, image sources removed) and shown in a shadow root under
+   the page's CSP, which forbids inline scripts; nothing in a message can
+   make the browser fetch from a third party until the user presses "Load
+   images" for the thread in front of them, which keeps https and data
+   image sources and resolves `cid:` parts from the raw blob. The policy
+   allows https images for that one case. Attachments and
+   the original are extracted from the raw blob in the browser.
 4. Search runs entirely in memory: metadata filters (sender, recipient,
    subject, date range, labels, has-attachment) combined with full-text lookup
    in the merged term index, ranked by term frequency and recency.
-5. Lock clears memory. The encrypted cache stays on disk and is useless
+5. While unlocked, the manifest is re-read every minute and when the tab
+   regains focus. A changed ETag means another device committed segments:
+   the newer manifest is adopted (so the next commit here builds on it) and
+   the user is offered to load the segments it lists.
+6. Lock clears memory. The encrypted cache stays on disk and is useless
    without the passphrase.
 
 Any browser with the URL and passphrase gets the same experience. First unlock

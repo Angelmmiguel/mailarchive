@@ -59,3 +59,12 @@ describe('threadMap', () => {
 		expect(index.threadMap().get('a@x')).toBe('root@x');
 	});
 });
+
+describe('threads', () => {
+	it('groups the records and finds a thread by id', () => {
+		index.add('s1', [record('a', { threadId: 'root@x' }), record('b', { threadId: 'root@x' })]);
+
+		expect(index.threads).toHaveLength(1);
+		expect(index.threadById.get('root@x')?.messages.map((m) => m.id)).toEqual(['a', 'b']);
+	});
+});

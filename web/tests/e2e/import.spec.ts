@@ -70,8 +70,8 @@ test('chosen files are parsed, uploaded and summarised', async () => {
 	await expect(toast).toContainText('Import finished. 3 messages added, 0 duplicates, 1 failed.');
 	await toast.getByRole('link', { name: 'View' }).click();
 	await expect(toast).toBeHidden();
-	await expect(page.getByRole('heading', { name: 'The archive is ready' })).toBeVisible();
-	await expect(page.getByText('3 messages')).toBeVisible();
+	await expect(page.getByRole('region', { name: 'Threads' })).toBeVisible();
+	await expect(page.getByText('2 threads')).toBeVisible();
 });
 
 test('importing the same messages again finds only duplicates', async () => {
@@ -85,7 +85,7 @@ test('importing the same messages again finds only duplicates', async () => {
 	await expect(page.getByTestId('toast').last()).toContainText(
 		'Import finished. 0 messages added, 2 duplicates, 0 failed.'
 	);
-	await expect(page.getByText('3 messages')).toBeVisible();
+	await expect(page.getByText('2 threads')).toBeVisible();
 });
 
 test('a dropped file anywhere on the page starts an import', async () => {
@@ -105,7 +105,7 @@ test('a dropped file anywhere on the page starts an import', async () => {
 	await page.dispatchEvent('main', 'drop', { dataTransfer: transfer });
 
 	await expect(page.getByTestId('toast').last()).toContainText('1 message added');
-	await expect(page.getByText('4 messages')).toBeVisible();
+	await expect(page.getByText('3 threads')).toBeVisible();
 });
 
 test('the index comes back after lock, unlock and reload', async () => {
@@ -113,13 +113,16 @@ test('the index comes back after lock, unlock and reload', async () => {
 	await expect(page).toHaveURL(/\/unlock/);
 	await page.getByLabel('Passphrase').fill(PASSPHRASE);
 	await page.getByRole('button', { name: 'Unlock' }).click();
-	await expect(page.getByText('4 messages')).toBeVisible();
+	await expect(page.getByText('3 threads')).toBeVisible();
 
 	await page.reload();
-	await expect(page.getByText('4 messages')).toBeVisible();
+	await expect(page.getByText('3 threads')).toBeVisible();
 
 	// Dedup works from the freshly loaded index too.
-	await page.getByRole('button', { name: 'Import more' }).click();
+	await page
+		.getByRole('navigation', { name: 'Archive' })
+		.getByRole('button', { name: 'Import' })
+		.click();
 	await expect(page.getByTestId('import-panel')).toBeVisible();
 	await page.getByTestId('file-input').setInputFiles([fixture('reply.eml')]);
 	await expect(page.getByTestId('toast').last()).toContainText('0 messages added, 1 duplicate');

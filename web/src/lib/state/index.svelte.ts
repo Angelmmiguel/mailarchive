@@ -1,12 +1,14 @@
 /**
  * The merged index: every record of every loaded segment, in memory while
  * unlocked. Import checks new messages against it and adds what it
- * stores; the list views read from it. `records` is `$state.raw` because
- * a deep proxy over tens of thousands of records would cost more than the
- * reactivity is worth; replace the array to notify.
+ * stores; the list views read from it grouped into threads. `records` is
+ * `$state.raw` because a deep proxy over tens of thousands of records
+ * would cost more than the reactivity is worth; replace the array to
+ * notify.
  */
 import type { ThreadMap } from '$lib/mail/thread';
 import { headerKey, type IndexRecord } from '$lib/index/records';
+import { groupThreads, type Thread } from '$lib/index/threads';
 
 export interface IndexProgress {
 	done: number;
@@ -21,10 +23,13 @@ class Index {
 	loading = $state<IndexProgress | null>(null);
 
 	messages = $derived(this.records.length);
+	/** Newest first. */
+	threads = $derived(groupThreads(this.records));
+	threadById = $derived(new Map(this.threads.map((t) => [t.id, t] as [string, Thread])));
 
 	private byId = new Map<string, IndexRecord>();
 	private byHeader = new Map<string, IndexRecord>();
-	private threads: ThreadMap = new Map();
+	private threadMapping: ThreadMap = new Map();
 
 	/** The record with this raw id, or the record a re-export of it would duplicate. */
 	find(record: {
@@ -41,7 +46,7 @@ class Index {
 
 	/** Message-ID header → thread id, for threading new messages. */
 	threadMap(): ThreadMap {
-		return this.threads;
+		return this.threadMapping;
 	}
 
 	/** Adds the records of one segment. Records already present are skipped. */
@@ -52,8 +57,8 @@ class Index {
 			this.byId.set(record.id, record);
 			const key = headerKey(record);
 			if (key !== null && !this.byHeader.has(key)) this.byHeader.set(key, record);
-			if (record.messageId !== null && !this.threads.has(record.messageId)) {
-				this.threads.set(record.messageId, record.threadId);
+			if (record.messageId !== null && !this.threadMapping.has(record.messageId)) {
+				this.threadMapping.set(record.messageId, record.threadId);
 			}
 			fresh.push(record);
 		}
@@ -67,7 +72,7 @@ class Index {
 		this.loading = null;
 		this.byId.clear();
 		this.byHeader.clear();
-		this.threads.clear();
+		this.threadMapping.clear();
 	}
 }
 

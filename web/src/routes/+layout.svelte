@@ -79,10 +79,11 @@
 <Toasts />
 
 <style>
+	/* The viewport, so that the archive's panes scroll on their own. */
 	.shell {
 		display: flex;
 		flex-direction: column;
-		min-height: 100vh;
+		height: 100vh;
 	}
 
 	.brand {
@@ -93,8 +94,10 @@
 
 	main {
 		flex: 1;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
 		padding: 0 var(--space-5);
+		overflow-y: auto;
 	}
 </style>

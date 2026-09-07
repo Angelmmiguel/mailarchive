@@ -73,9 +73,11 @@ unlock (offer to reload).
 Selecting a row opens Thread. On wide screens Thread opens beside the list;
 on narrow screens it replaces it.
 
-### Thread `/t/<thread id>`
+### Thread `/t/<thread key>`
 The messages of one conversation, oldest first, all collapsed except the
-latest. An expanded message shows from, to, cc, date, subject, the body
+latest. The key is an HMAC of the thread id under the id key, so the address
+a hard reload sends the server names nothing, and every device derives the
+same one. An expanded message shows from, to, cc, date, subject, the body
 (text or sanitized HTML, with a toggle) and its attachments as chips.
 Per message: download attachment, download the original `.eml`, view source.
 Per thread: previous and next thread in the current list, back to Archive.
@@ -134,6 +136,28 @@ Things the account layer cannot handle on its own and the screens must.
   `lib/app/navigation.ts` accepts only a path inside the app, so a crafted
   link cannot send a freshly unlocked user to another origin. Lock builds the
   URL with `unlockUrl` from the current location.
+- **The list and the reader share one listing.** `state/view.svelte.ts`
+  derives the visible threads from the index and the filters, which the
+  Archive layout reads from the query string (`sent=1`, `attachments=1`)
+  and keeps on every thread link, so a location carries its filters. The
+  reader finds its position, previous and next in that same listing; a
+  thread the filters hide reads `– / n`. Thread rows are links to
+  `/t/<key>` and the arrow keys (or j and k) move the selection from
+  anywhere that is not a text field.
+- **Bodies are rendered from the view blob, sanitized every time.** HTML
+  goes through DOMPurify (`lib/mail/sanitize.ts`) into a shadow root, so
+  the message's styles stay in and the page's stay out; scripts, forms,
+  embedded documents and image sources are removed, links open in a new
+  tab without a referrer. "Load images" in the reader's bar shows them for
+  the thread being read only: remote ones from their source, `cid:` parts
+  from the raw blob as object URLs; the next thread starts with them off. Text is the default; the toggle shows HTML when
+  the message has it. The original `.eml`, its source and its attachments
+  come from the raw blob, decrypted and, for attachments, parsed again in
+  the browser; images, PDFs and plain text open in a tab, the rest download.
+- **Segments from another device.** The Archive layout checks the manifest
+  every minute and when the tab regains focus (`lib/account/sync.ts`); a
+  newer manifest is adopted at once, and the strip above the list offers to
+  load the segments it brought. Nothing reorders under the reader on its own.
 - **Health goes stale after Create account.** The shell reads
   `GET /api/health` once per page load, before the account exists, so Create
   account marks the archive as set up itself once the flow moves on. Screens
