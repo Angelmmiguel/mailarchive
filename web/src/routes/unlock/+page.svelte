@@ -15,15 +15,13 @@
 		ServerUnreachableError,
 		WrongPassphraseError
 	} from '$lib/account/errors';
-	import { openIndex } from '$lib/account/segments';
-	import { indexProblem } from '$lib/app/boot';
+	import { openArchive } from '$lib/app/boot';
 	import { unlock } from '$lib/account/unlock';
 	import { PassphraseTooLongError, PassphraseTooShortError } from '$lib/crypto/kdf';
 	import { returnPath } from '$lib/app/navigation';
 	import { Banner, Button, Field, Notice, ProgressPanel, Step } from '$lib/components';
 	import { archive } from '$lib/state/archive.svelte';
 	import { index } from '$lib/state/index.svelte';
-	import { toasts } from '$lib/state/toasts.svelte';
 	import { session } from '$lib/state/session.svelte';
 
 	let passphrase = $state('');
@@ -53,11 +51,7 @@
 		try {
 			await unlock(passphrase);
 			passphrase = '';
-			try {
-				await openIndex();
-			} catch (e) {
-				toasts.push({ tone: 'danger', label: 'index', message: indexProblem(e) }, 0);
-			}
+			await openArchive();
 		} catch (e) {
 			// A passphrase outside the accepted length cannot be the right one, and
 			// saying which limit it broke would give a guesser a hint.

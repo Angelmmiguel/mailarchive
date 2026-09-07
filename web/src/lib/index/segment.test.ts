@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { deriveSubkeys, generateDek } from '$lib/crypto/keys';
 import { SealError } from '$lib/crypto/aead';
+import { encryptBlobAs } from '$lib/crypto/blob';
+import { compress } from '$lib/crypto/compress';
 import type { IndexRecord } from './records';
 import {
 	decodeSegmentIndex,
@@ -56,6 +58,18 @@ describe('segment index', () => {
 });
 
 describe('shards', () => {
+	it('rejects postings that are not [id, field, frequency]', async () => {
+		const id = 'f'.repeat(64);
+		for (const terms of [{ a: 'x' }, { a: [['m', 1]] }, { a: [['m', 1, 0]] }, { a: [[1, 1, 1]] }]) {
+			const sealed = encryptBlobAs(
+				keys,
+				id,
+				await compress(new TextEncoder().encode(JSON.stringify({ version: 1, prefix: 'a', terms })))
+			);
+			await expect(decodeShard(keys, id, sealed)).rejects.toThrow(IndexFormatError);
+		}
+	});
+
 	it('groups terms by prefix under HMAC names and round-trips', async () => {
 		const shards = groupShards('seg', keys, [
 			{

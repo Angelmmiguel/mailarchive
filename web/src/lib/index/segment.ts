@@ -105,9 +105,17 @@ export async function decodeShard(
 	if (
 		parsed.version !== INDEX_VERSION ||
 		typeof parsed.terms !== 'object' ||
-		parsed.terms === null
+		parsed.terms === null ||
+		typeof parsed.prefix !== 'string'
 	) {
 		throw new IndexFormatError('not a term shard');
+	}
+	const terms: Record<string, unknown> = { ...parsed.terms };
+	for (const term in terms) {
+		const postings = terms[term];
+		if (!Array.isArray(postings) || !postings.every(isPosting)) {
+			throw new IndexFormatError('malformed postings');
+		}
 	}
 	return parsed as unknown as TermShard;
 }
@@ -115,6 +123,17 @@ export async function decodeShard(
 /** `HMAC-SHA256(id key, "<segment id>/<prefix>")`, hex. */
 export function shardIdFor(keys: Subkeys, segmentId: string, prefix: string): string {
 	return bytesToHex(hmac(sha256, keys.id, new TextEncoder().encode(`${segmentId}/${prefix}`)));
+}
+
+function isPosting(value: unknown): value is Posting {
+	return (
+		Array.isArray(value) &&
+		value.length === 3 &&
+		typeof value[0] === 'string' &&
+		Number.isInteger(value[1]) &&
+		Number.isInteger(value[2]) &&
+		(value[2] as number) > 0
+	);
 }
 
 function encodeJson(value: unknown): Bytes {

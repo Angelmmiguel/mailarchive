@@ -1,14 +1,21 @@
 <!--
-  The list of threads: the filter chips, the count, the rows. Rows come
-  in pages as the list is scrolled, and the arrow keys (or j and k) move
-  the selection from anywhere on the screen that is not a text field.
+  The list of threads: the chips that edit the query, the count, the rows.
+  Rows come in pages as the list is scrolled, and the arrow keys (or j and
+  k) move the selection from anywhere on the screen that is not a text
+  field. Nothing found is a state of its own, with the way out of it.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { ResolvedPathname } from '$app/types';
 	import { count } from '$lib/app/format';
-	import { participantsOf, type Filters, type Thread } from '$lib/index/threads';
+	import { participantsOf, type Thread } from '$lib/index/threads';
+	import { presetOf, presets, rangeLabel } from '$lib/search/dates';
+	import { hasWords, isEmpty, parseQuery, setOperator, withoutDates } from '$lib/search/query';
+	import type { Order } from '$lib/search/search';
+	import type { IndexProgress } from '$lib/state/index.svelte';
+	import Button from './Button.svelte';
 	import Chip from './Chip.svelte';
+	import ChipMenu, { type Item } from './ChipMenu.svelte';
 	import ThreadRow from './ThreadRow.svelte';
 
 	interface Props {
@@ -16,9 +23,15 @@
 		/** The thread the reader shows, if any. */
 		selected?: string | null;
 		own: string[];
-		filters: Filters;
+		query: string;
+		order: Order;
+		/** Years with messages, for the date chip. */
+		years: number[];
+		/** Shards still arriving: body search covers only part of the archive. */
+		indexing?: IndexProgress | null;
 		hrefFor: (thread: Thread) => ResolvedPathname;
-		onfilters: (filters: Filters) => void;
+		onquery: (query: string) => void;
+		onorder: (order: Order) => void;
 		onopen: (thread: Thread) => void;
 		banner?: Snippet;
 	}
@@ -27,9 +40,13 @@
 		threads,
 		selected = null,
 		own,
-		filters,
+		query,
+		order,
+		years,
+		indexing = null,
 		hrefFor,
-		onfilters,
+		onquery,
+		onorder,
 		onopen,
 		banner
 	}: Props = $props();
@@ -38,7 +55,61 @@
 	let limit = $state(PAGE);
 	let list = $state<HTMLElement | null>(null);
 	const shown = $derived(threads.slice(0, limit));
-	const filtered = $derived(filters.sent || filters.attachments);
+
+	const parsed = $derived(parseQuery(query));
+	const ranges = $derived(presets(years));
+	const range = $derived(rangeLabel(parsed, ranges));
+	const preset = $derived(presetOf(parsed, ranges));
+	const ranked = $derived(hasWords(parsed));
+	const dateItems = $derived.by((): Item[] => {
+		const items: Item[] = ranges.map((p) => ({
+			id: `range:${p.id}`,
+			label: p.label,
+			checked: preset?.id === p.id,
+			group: 'Range'
+		}));
+		if (ranked) {
+			items.push({
+				id: 'order:best',
+				label: 'Best match',
+				checked: order === 'best',
+				group: 'Order'
+			});
+		}
+		items.push(
+			{
+				id: 'order:newest',
+				label: 'Newest first',
+				checked: order === 'newest' || (order === 'best' && !ranked),
+				group: 'Order'
+			},
+			{ id: 'order:oldest', label: 'Oldest first', checked: order === 'oldest', group: 'Order' }
+		);
+		return items;
+	});
+
+	function pickDate(id: string): void {
+		if (id.startsWith('order:')) {
+			onorder(id.slice('order:'.length) as Order);
+			return;
+		}
+		const chosen = ranges.find((p) => `range:${p.id}` === id);
+		if (chosen === undefined) return;
+		onquery(setOperator(setOperator(query, 'after', chosen.after), 'before', chosen.before));
+	}
+
+	const between = $derived.by((): string | null => {
+		const after = parsed.after?.text;
+		const before = parsed.before?.text;
+		if (after !== undefined && before !== undefined) return `between ${after} and ${before}`;
+		if (after !== undefined) return `since ${after}`;
+		if (before !== undefined) return `before ${before}`;
+		return null;
+	});
+	const rest = $derived(withoutDates(query).trim());
+	// Spaces live in the expressions: the template trims them at block edges.
+	const lead = $derived(rest === '' ? 'Nothing ' : 'Nothing matches ');
+	const tail = $derived(between === null ? '.' : ` ${between}.`);
 
 	function scrolled(): void {
 		if (list === null || limit >= threads.length) return;
@@ -83,14 +154,25 @@
 <section class="threads" aria-label="Threads">
 	{#if banner}{@render banner()}{/if}
 	<div class="filters">
-		<Chip active={filters.sent} onclick={() => onfilters({ ...filters, sent: !filters.sent })}
-			>sent</Chip
+		<Chip
+			active={parsed.sent}
+			onclick={() => onquery(setOperator(query, 'is', parsed.sent ? null : 'sent'))}>sent</Chip
 		>
 		<Chip
-			active={filters.attachments}
-			onclick={() => onfilters({ ...filters, attachments: !filters.attachments })}>attachments</Chip
+			active={parsed.attachments}
+			onclick={() => onquery(setOperator(query, 'has', parsed.attachments ? null : 'attachment'))}
+			>attachments</Chip
 		>
-		<span class="count">{count(threads.length, 'thread')}</span>
+		<ChipMenu
+			label={range ?? 'date'}
+			active={range !== null || order !== 'best'}
+			items={dateItems}
+			onselect={pickDate}
+		/>
+		<span class="count">
+			{count(threads.length, 'thread')}{#if indexing !== null}
+				<span class="indexing" role="status">· indexing {indexing.done}/{indexing.total}</span>{/if}
+		</span>
 	</div>
 	<div class="rows" bind:this={list} onscroll={scrolled}>
 		{#each shown as thread (thread.id)}
@@ -101,9 +183,24 @@
 				selected={thread.id === selected}
 			/>
 		{:else}
-			<p class="none">
-				{filtered ? 'No threads match these filters.' : 'No threads yet.'}
-			</p>
+			{#if isEmpty(parsed)}
+				<p class="none">No threads yet.</p>
+			{:else}
+				<section class="empty" aria-labelledby="no-results">
+					<h2 id="no-results">No results</h2>
+					<p>
+						{lead}{#if rest !== ''}<code>{rest}</code>{/if}{tail}
+					</p>
+					<div class="actions">
+						{#if between !== null}
+							<Button variant="secondary" size="sm" onclick={() => onquery(withoutDates(query))}
+								>Clear date range</Button
+							>
+						{/if}
+						<Button variant="secondary" size="sm" onclick={() => onquery('')}>Clear all</Button>
+					</div>
+				</section>
+			{/if}
 		{/each}
 	</div>
 </section>
@@ -130,6 +227,11 @@
 		margin-left: auto;
 		font: var(--mono-sm) var(--font-mono);
 		color: var(--text-faint);
+		white-space: nowrap;
+	}
+
+	.indexing {
+		margin-left: 4px;
 	}
 
 	.rows {
@@ -143,5 +245,38 @@
 		padding: var(--space-6) var(--space-4);
 		font: var(--body-md) / var(--body-leading) var(--font-body);
 		color: var(--text-muted);
+	}
+
+	.empty {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		padding: var(--space-7) var(--space-5);
+	}
+
+	h2 {
+		margin: 0;
+		font: 600 var(--body-lg) / 1.3 var(--font-body);
+	}
+
+	.empty p {
+		margin: 0;
+		font: var(--body-md) / var(--body-leading) var(--font-body);
+		color: var(--text-muted);
+		overflow-wrap: anywhere;
+	}
+
+	code {
+		padding: 1px 5px;
+		border-radius: var(--radius-sm);
+		background: var(--surface-inset);
+		font: var(--mono-md) var(--font-mono);
+		color: var(--text-body);
+	}
+
+	.actions {
+		display: flex;
+		gap: var(--space-2);
+		flex-wrap: wrap;
 	}
 </style>

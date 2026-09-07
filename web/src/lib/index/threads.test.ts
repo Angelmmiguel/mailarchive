@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IndexRecord } from './records';
 import {
-	filterThreads,
 	groupThreads,
 	NO_SUBJECT,
 	participantsOf,
@@ -82,29 +81,6 @@ describe('groupThreads', () => {
 		]);
 
 		expect(threads.map((t) => t.id)).toEqual(['a@x', 'b@x']);
-	});
-});
-
-describe('filterThreads', () => {
-	it('narrows by sent and by attachments, both when both are on', () => {
-		const threads = groupThreads([
-			record('a', { threadId: 'plain@x' }),
-			record('b', { threadId: 'sent@x', labels: ['sent'] }),
-			record('c', {
-				threadId: 'both@x',
-				labels: ['sent', 'attachments'],
-				attachments: [{ name: 'a.pdf', type: 'application/pdf', size: 1, inline: false, index: 0 }]
-			})
-		]);
-
-		expect(filterThreads(threads, { sent: false, attachments: false })).toBe(threads);
-		expect(filterThreads(threads, { sent: true, attachments: false }).map((t) => t.id)).toEqual([
-			'both@x',
-			'sent@x'
-		]);
-		expect(filterThreads(threads, { sent: true, attachments: true }).map((t) => t.id)).toEqual([
-			'both@x'
-		]);
 	});
 });
 

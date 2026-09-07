@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { returnPath, unlockUrl } from './navigation';
+import { archiveSearch, returnPath, unlockUrl } from './navigation';
 
 describe('returnPath', () => {
 	it('keeps a path inside the app, query and hash included', () => {
@@ -23,5 +23,15 @@ describe('unlockUrl', () => {
 		expect(unlockUrl('/t/abc?q=x', 'expired')).toBe(
 			'/unlock?reason=expired&next=%2Ft%2Fabc%3Fq%3Dx'
 		);
+	});
+});
+
+describe('archiveSearch', () => {
+	it('carries the query and a non-default order', () => {
+		expect(archiveSearch('', 'best')).toBe('');
+		expect(archiveSearch('  ', 'best')).toBe('');
+		expect(archiveSearch('from:okafor "net 30"', 'best')).toBe('?q=from%3Aokafor%20%22net%2030%22');
+		expect(archiveSearch('x', 'oldest')).toBe('?q=x&order=oldest');
+		expect(archiveSearch('', 'newest')).toBe('?order=newest');
 	});
 });

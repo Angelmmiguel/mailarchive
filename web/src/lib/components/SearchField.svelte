@@ -1,9 +1,12 @@
 <!--
-  The archive's search entry: a slash prefix, the query and the shortcut
-  hint. Pressing `/` anywhere on the page focuses it. The query is only
-  collected here; what it filters belongs to the list.
+  The archive's search entry: a slash prefix, the query, the help and the
+  shortcut hint. Pressing `/` anywhere on the page focuses it, Escape
+  leaves it. The query is only collected here; what it finds belongs to
+  the list.
 -->
 <script lang="ts">
+	import SearchHelp from './SearchHelp.svelte';
+
 	interface Props {
 		value?: string;
 		disabled?: boolean;
@@ -30,17 +33,34 @@
 			event.preventDefault();
 			input.focus();
 			input.select();
+		} else if (event.key === 'Escape' && target === input) {
+			input.blur();
 		}
+	}
+
+	function pick(query: string): void {
+		value = query;
+		input?.focus();
 	}
 </script>
 
 <svelte:window onkeydown={shortcut} />
 
-<label class="search" class:disabled>
+<div class="search" class:disabled>
 	<span class="slash" aria-hidden="true">/</span>
-	<input type="search" bind:this={input} bind:value {disabled} {placeholder} aria-label="Search" />
+	<input
+		type="search"
+		bind:this={input}
+		bind:value
+		{disabled}
+		{placeholder}
+		aria-label="Search"
+		autocomplete="off"
+		spellcheck="false"
+	/>
+	{#if !disabled}<SearchHelp onpick={pick} />{/if}
 	<kbd aria-hidden="true">⌘K</kbd>
-</label>
+</div>
 
 <style>
 	.search {

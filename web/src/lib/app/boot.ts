@@ -4,7 +4,13 @@
  * sealed DEK a refresh leaves in sessionStorage. Screens then decide from
  * `archive` and `session` where the user belongs.
  */
-import { MissingSegmentError, openIndex } from '$lib/account/segments';
+import {
+	MissingSegmentError,
+	MissingShardError,
+	openIndex,
+	openTerms
+} from '$lib/account/segments';
+import { LockedError } from '$lib/account/errors';
 import { resume } from '$lib/account/unlock';
 import { archive } from '$lib/state/archive.svelte';
 import { session } from '$lib/state/session.svelte';
@@ -20,15 +26,31 @@ export async function boot(): Promise<void> {
 		// exactly what a fresh visit looks like: the unlock screen handles it.
 		session.lock();
 	}
+	await openArchive();
+}
+
+/**
+ * Loads the index, then the term shards behind it without holding the
+ * screen: the list shows as soon as the records are in, bodies become
+ * searchable as shards arrive. Unlock and Reload call this too.
+ */
+export async function openArchive(): Promise<void> {
 	try {
 		await openIndex();
 	} catch (e) {
 		// The archive opens with what could be read; Unlock says the same.
 		toasts.push({ tone: 'danger', label: 'index', message: indexProblem(e) }, 0);
 	}
+	void openTerms().catch((e: unknown) => {
+		if (e instanceof LockedError) return;
+		toasts.push({ tone: 'danger', label: 'search', message: indexProblem(e) }, 0);
+	});
 }
 
 export function indexProblem(e: unknown): string {
+	if (e instanceof MissingShardError) {
+		return 'The manifest lists a term shard the server no longer has. Body search is incomplete.';
+	}
 	if (e instanceof MissingSegmentError) {
 		return 'The manifest lists a segment the server no longer has. The index is incomplete.';
 	}

@@ -25,12 +25,14 @@ import { recover } from './recover';
 import { changePassphrase, regenerateRecoveryKey } from './rotate';
 import { createAccount } from './setup';
 import { lock, resume, unlock } from './unlock';
+import { MemoryCache } from '$lib/cache/blobs';
 
 const base = inject('base');
 
 /** The real code path at the smallest cost `parseKdfParams` accepts. */
 const deps: Deps = {
 	api: client,
+	cache: new MemoryCache(),
 	deriveRoot: (passphrase, params) => Promise.resolve(deriveRoot(passphrase, params)),
 	newKdfParams: () => ({
 		name: 'argon2id',

@@ -1,17 +1,36 @@
 /**
- * What the reading screens share: the filters narrowing the list, the
- * threads they leave, and the opaque names threads carry in the URL. The
- * reader finds its neighbours in the same listing the list shows.
+ * What the reading screens share: the query narrowing the list, the
+ * threads it leaves in the order asked for, and the opaque names threads
+ * carry in the URL. The reader finds its neighbours in the same listing
+ * the list shows.
  */
 import { LockedError } from '$lib/account/errors';
-import { filterThreads, threadKey, type Filters, type Thread } from '$lib/index/threads';
+import { threadKey, type Thread } from '$lib/index/threads';
+import { yearsOf } from '$lib/search/dates';
+import { parseQuery } from '$lib/search/query';
+import { search, type Order } from '$lib/search/search';
 import { importState } from './import.svelte';
 import { index } from './index.svelte';
 import { session } from './session.svelte';
+import { terms } from './terms.svelte';
 
 class View {
-	filters = $state<Filters>({ sent: false, attachments: false });
-	listing = $derived(filterThreads(index.threads, this.filters));
+	/** The search box, as typed; the URL carries it as `q`. */
+	query = $state('');
+	order = $state<Order>('best');
+	parsed = $derived(parseQuery(this.query));
+	results = $derived(
+		search(
+			index.threads,
+			this.parsed,
+			session.manifest?.body.settings.ownAddresses ?? [],
+			terms.current(),
+			this.order
+		)
+	);
+	listing = $derived(this.results.map((r) => r.thread));
+	/** Years with dated messages, newest first, for the date chip. */
+	years = $derived(yearsOf(index.records));
 	/**
 	 * Segments the manifest lists that the index has not loaded: what
 	 * another device added since unlock. An import's own segments reach the
@@ -52,7 +71,8 @@ class View {
 	}
 
 	reset(): void {
-		this.filters = { sent: false, attachments: false };
+		this.query = '';
+		this.order = 'best';
 		this.keys.clear();
 		this.ids.clear();
 	}

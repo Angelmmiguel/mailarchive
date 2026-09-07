@@ -4,6 +4,7 @@
  * that derive so tests can check what a flow sends against real keys.
  */
 import { vi, type Mock } from 'vitest';
+import { MemoryCache } from '$lib/cache/blobs';
 import type { Api, Deps } from '$lib/account/deps';
 import { encodeBase64 } from '$lib/api/encoding';
 import type { Bytes } from '$lib/api/types';
@@ -64,6 +65,7 @@ export interface TinyDeps extends Deps {
 export function tinyDeps(api: MockApi): TinyDeps {
 	return {
 		api,
+		cache: new MemoryCache(),
 		deriveRoot: vi.fn<Deps['deriveRoot']>((passphrase, params) =>
 			Promise.resolve(tinyDerive(passphrase, params))
 		),

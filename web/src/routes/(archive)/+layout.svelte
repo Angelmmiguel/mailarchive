@@ -2,8 +2,9 @@
   The archive. Health decides where a visitor belongs: no account goes to
   Create account, a locked archive to Unlock. What remains is the list of
   threads with, beside it, whatever the address names: the reader for a
-  thread, or the prompt to pick one. Filters travel in the query string
-  so that a location can be shared between devices. Every so often the
+  thread, or the prompt to pick one. The shell keeps the query and the
+  URL in step; the chips here write the URL straight away, with what the
+  box holds at that moment. Every so often the
   manifest is checked for segments another device wrote.
 -->
 <script lang="ts">
@@ -11,17 +12,18 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import type { ResolvedPathname } from '$app/types';
-	import { openIndex } from '$lib/account/segments';
 	import { checkForSegments, SYNC_INTERVAL } from '$lib/account/sync';
-	import { indexProblem } from '$lib/app/boot';
+	import { openArchive } from '$lib/app/boot';
+	import { archiveSearch } from '$lib/app/navigation';
 	import { count } from '$lib/app/format';
 	import { Button, Code, EmptyState, Strip, ThreadList } from '$lib/components';
-	import type { Filters, Thread } from '$lib/index/threads';
+	import type { Thread } from '$lib/index/threads';
+	import type { Order } from '$lib/search/search';
 	import { archive } from '$lib/state/archive.svelte';
 	import { importState } from '$lib/state/import.svelte';
 	import { index } from '$lib/state/index.svelte';
 	import { session } from '$lib/state/session.svelte';
-	import { toasts } from '$lib/state/toasts.svelte';
+	import { terms } from '$lib/state/terms.svelte';
 	import { view } from '$lib/state/view.svelte';
 
 	let { children } = $props();
@@ -40,26 +42,23 @@
 		else void goto(resolve('/unlock'), { replaceState: true });
 	});
 
-	$effect(() => {
-		const params = page.url.searchParams;
-		view.filters = { sent: params.has('sent'), attachments: params.has('attachments') };
-	});
-
-	function query(filters: Filters): string {
-		const parts: string[] = [];
-		if (filters.sent) parts.push('sent=1');
-		if (filters.attachments) parts.push('attachments=1');
-		return parts.length === 0 ? '' : `?${parts.join('&')}`;
-	}
-
 	// `ResolvedPathname` does not model a query string, hence the casts.
 	function hrefFor(thread: Thread): ResolvedPathname {
 		const path = resolve('/(archive)/t/[key]', { key: view.keyFor(thread.id) });
 		return `${path}${page.url.search}` as ResolvedPathname;
 	}
 
-	function setFilters(filters: Filters): void {
-		void goto(`${page.url.pathname}${query(filters)}` as ResolvedPathname, {
+	function setQuery(query: string): void {
+		view.query = query;
+		void goto(`${page.url.pathname}${archiveSearch(query, view.order)}` as ResolvedPathname, {
+			replaceState: true,
+			keepFocus: true
+		});
+	}
+
+	function setOrder(order: Order): void {
+		view.order = order;
+		void goto(`${page.url.pathname}${archiveSearch(view.query, order)}` as ResolvedPathname, {
 			replaceState: true,
 			keepFocus: true
 		});
@@ -72,9 +71,7 @@
 	async function reload(): Promise<void> {
 		reloading = true;
 		try {
-			await openIndex();
-		} catch (e) {
-			toasts.push({ tone: 'danger', label: 'index', message: indexProblem(e) }, 0);
+			await openArchive();
 		} finally {
 			reloading = false;
 		}
@@ -115,9 +112,13 @@
 				threads={view.listing}
 				{selected}
 				{own}
-				filters={view.filters}
+				query={view.query}
+				order={view.order}
+				years={view.years}
+				indexing={terms.loading}
 				{hrefFor}
-				onfilters={setFilters}
+				onquery={setQuery}
+				onorder={setOrder}
 				onopen={open}
 			>
 				{#snippet banner()}

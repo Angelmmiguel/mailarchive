@@ -64,12 +64,21 @@ ends in Archive.
 ### Archive `/`
 The main screen. A list of threads sorted by date, newest first, each row
 showing participants, subject, snippet, date, an attachment indicator and
-labels. Search field at the top; filter chips for `sent`, `attachments` and a
-date range. Search and filters narrow the same list in place; the URL carries
-the query so it can be shared between devices.
-States: loading index, empty archive (prompt to Import), no results for the
-current search, and a banner when another device has added segments since
-unlock (offer to reload).
+labels. Search field at the top, with a `?` beside it that opens the syntax
+and examples; filter chips for `sent`, `attachments` and a date menu with
+presets (any time, last 30 days, last 12 months, each year present) and the
+order (best match, newest, oldest). The chips write into the same query
+the box holds (`is:sent`, `has:attachment`, `after:`/`before:`), so the two
+never disagree; the URL carries the query as `q` and the order as `order`
+so a location can be shared between devices. Words match as prefixes as
+they are typed; `from:`, `to:`, `subject:`, quoted phrases and `-word`
+narrow further, and every part must hold somewhere in the thread.
+States: loading index, empty archive (prompt to Import), "indexing" beside
+the count while the term shards are still arriving (subjects and names
+already answer, bodies as shards come in), no results for the current
+search (says what was asked and offers to clear the date range or all of
+it), and a banner when another device has added segments since unlock
+(offer to reload).
 Selecting a row opens Thread. On wide screens Thread opens beside the list;
 on narrow screens it replaces it.
 
@@ -137,11 +146,14 @@ Things the account layer cannot handle on its own and the screens must.
   link cannot send a freshly unlocked user to another origin. Lock builds the
   URL with `unlockUrl` from the current location.
 - **The list and the reader share one listing.** `state/view.svelte.ts`
-  derives the visible threads from the index and the filters, which the
-  Archive layout reads from the query string (`sent=1`, `attachments=1`)
-  and keeps on every thread link, so a location carries its filters. The
-  reader finds its position, previous and next in that same listing; a
-  thread the filters hide reads `– / n`. Thread rows are links to
+  derives the visible threads from the index, the term index and the
+  query. The shell's search box edits that query directly, so the chips
+  see every keystroke, and pushes it to the URL (`q`, `order`) a moment
+  after typing stops; a URL that changes from elsewhere (back, a link)
+  resets the query. Every thread link keeps the query string, so a
+  location carries its search. The reader finds its position, previous
+  and next in that same listing, which under "best match" can shift as
+  shards arrive; a thread the query hides reads `– / n`. Thread rows are links to
   `/t/<key>` and the arrow keys (or j and k) move the selection from
   anywhere that is not a text field.
 - **Bodies are rendered from the view blob, sanitized every time.** HTML
@@ -165,9 +177,9 @@ Things the account layer cannot handle on its own and the screens must.
 - **Not yet built.** The decrypting-index progress after a correct
   passphrase (there is no index to decrypt), the attempts-left count in the
   wrong-passphrase message (the server does not report it; the rate-limited
-  message asks to wait a minute, the default window), the no-results state
-  of Archive (it belongs to the list). Recover is a placeholder that Unlock
-  links to.
+  message asks to wait a minute, the default window). Recover is a
+  placeholder that Unlock links to. Settings, with clearing this device's
+  cache, is not built, so the cache only grows for now.
 - **Import lives in the shell.** The panel, the page-wide drop target and the
   toasts are mounted by the layout once the session is unlocked, so a run
   keeps going while the user moves between views. `lib/import/start.ts`

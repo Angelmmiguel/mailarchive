@@ -2,7 +2,7 @@
  * The list and the reader, on a server this file sets up for itself and
  * fills with the synthetic fixtures: rows, opening a thread, bodies in
  * text and HTML, attachments and the original, moving between threads,
- * filters in the URL, addresses after a reload, the narrow layout and
+ * the chips in the URL, addresses after a reload, the narrow layout and
  * segments another device adds. Steps build on each other and run in
  * file order.
  */
@@ -152,14 +152,14 @@ test('prev, next and the arrow keys move through the listing', async () => {
 
 test('filters narrow the list, travel in the URL and survive a reload', async () => {
 	await page.getByRole('button', { name: 'attachments' }).click();
-	await expect(page).toHaveURL(/\?attachments=1$/);
+	await expect(page).toHaveURL(/\?q=has%3Aattachment$/);
 	await expect(page.getByText('1 thread')).toBeVisible();
 	await expect(rows()).toHaveCount(1);
 	// The open thread is not in the narrowed list, and says so.
 	await expect(reader().getByText('– / 1')).toBeVisible();
 
 	await page.getByRole('button', { name: 'sent' }).click();
-	await expect(page).toHaveURL(/\?sent=1&attachments=1$/);
+	await expect(page).toHaveURL(/\?q=has%3Aattachment%20is%3Asent$/);
 	await expect(rows()).toHaveCount(1);
 
 	await page.reload();

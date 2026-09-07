@@ -14,6 +14,7 @@ import { session, type SessionManifest } from '$lib/state/session.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { view } from '$lib/state/view.svelte';
 import { forgetMessages } from './messages';
+import { terms } from '$lib/state/terms.svelte';
 import { defaultDeps, type Api, type Deps } from './deps';
 import { call, callAs, MissingManifestError, WrongPassphraseError } from './errors';
 
@@ -71,6 +72,7 @@ export async function resume(
 export async function lock(deps: Deps = defaultDeps): Promise<void> {
 	session.lock();
 	index.clear();
+	terms.clear();
 	importState.reset();
 	toasts.clear();
 	view.reset();

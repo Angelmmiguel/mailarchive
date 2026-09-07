@@ -261,11 +261,21 @@ against the server listing.
 
 ## Reading, cache and search
 
-1. Unlock: derive keys, open the local encrypted cache. If it holds a merged
-   index and term shards, decrypt them into memory and render immediately.
-2. Fetch the manifest. For any segment not yet in the cache, fetch its index
-   and shards, decrypt, merge into memory, and write the merged result back to
-   the cache encrypted under the cache key.
+1. Unlock: derive keys, fetch the manifest.
+2. For every segment it lists, read the segment index from the local cache
+   (IndexedDB, keyed by blob id) or, on a miss, from the server and into the
+   cache. Decrypt and merge into memory; the list renders as soon as the
+   indexes are in. The term shards follow the same path in the background,
+   a segment at a time, so a search never sees half a segment; the list
+   says "indexing" until they are all in. The cache holds blobs exactly as
+   the server does, ciphertext under the blob key, so it needs no key of
+   its own: a disk that leaks it leaks what the server already had, and
+   an entry can never be stale because blobs are write-once and named by
+   content or HMAC. A cached copy that fails to decrypt is dropped and
+   fetched again. An import writes its own index and shards into the cache
+   as it uploads them. The cache is dropped whole from Settings, never
+   pruned; the cache key derived from the DEK stays reserved for derived
+   data that is not a server blob.
 3. List and thread views render from memory. Opening a message fetches and
    decrypts its view blob; a few dozen opened views are kept in memory until
    lock. View and raw blobs are also cached as ciphertext.
@@ -280,9 +290,22 @@ against the server listing.
    image sources and resolves `cid:` parts from the raw blob. The policy
    allows https images for that one case. Attachments and
    the original are extracted from the raw blob in the browser.
-4. Search runs entirely in memory: metadata filters (sender, recipient,
-   subject, date range, labels, has-attachment) combined with full-text lookup
-   in the merged term index, ranked by term frequency and recency.
+4. Search runs entirely in memory and sends nothing to the server. The
+   query is one string: words, "phrases", -exclusions and the operators
+   `from:`, `to:`, `subject:`, `has:attachment`, `is:sent`, `after:`
+   and `before:`; the chips and the date menu edit that string, and the
+   URL carries it as `q` (plus `order`). Words match as prefixes against
+   the record's subject, names and snippet, and against the merged term
+   index for bodies, so a hit in the subject shows before the shards are
+   in. Every part of the query must hold for some message of a thread, not
+   necessarily the same one, since the list is threads. With words in the
+   query the threads rank by the sum of their best hits (subject above
+   names above body, times log frequency, exact term above prefix), ties by
+   date; without, or on request, newest or oldest first. Client-side
+   navigation keeps `q` in the browser, but a hard reload or a bookmark
+   sends it to the server as part of the request line, unlike thread
+   addresses, which are HMACs. The server logs paths only; a reverse
+   proxy in front must be told not to log query strings.
 5. While unlocked, the manifest is re-read every minute and when the tab
    regains focus. A changed ETag means another device committed segments:
    the newer manifest is adopted (so the next commit here builds on it) and

@@ -24,11 +24,6 @@ export interface Thread {
 	labels: string[];
 }
 
-export interface Filters {
-	sent: boolean;
-	attachments: boolean;
-}
-
 export const NO_SUBJECT = '(no subject)';
 
 export function groupThreads(records: IndexRecord[]): Thread[] {
@@ -64,7 +59,7 @@ export function groupThreads(records: IndexRecord[]): Thread[] {
 }
 
 /** Ascending by date; undated after everything dated in both directions. */
-function byDate(
+export function byDate(
 	a: { date: string | null },
 	b: { date: string | null },
 	reversed: boolean = false
@@ -73,13 +68,6 @@ function byDate(
 	if (a.date === null) return reversed ? -1 : 1;
 	if (b.date === null) return reversed ? 1 : -1;
 	return a.date < b.date ? -1 : 1;
-}
-
-export function filterThreads(threads: Thread[], filters: Filters): Thread[] {
-	if (!filters.sent && !filters.attachments) return threads;
-	return threads.filter(
-		(t) => (!filters.sent || t.labels.includes(SENT)) && (!filters.attachments || t.attachments > 0)
-	);
 }
 
 /**

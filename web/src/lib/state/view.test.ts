@@ -6,6 +6,8 @@ import { createTestAccount } from '$lib/testing/account';
 import { importState } from './import.svelte';
 import { index } from './index.svelte';
 import { session } from './session.svelte';
+import { terms } from './terms.svelte';
+import { INDEX_VERSION } from '$lib/index/records';
 import { view } from './view.svelte';
 
 function record(id: string, extra: Partial<IndexRecord> = {}): IndexRecord {
@@ -34,6 +36,7 @@ beforeEach(() => {
 	index.clear();
 	importState.reset();
 	view.reset();
+	terms.clear();
 	session.unlock(Uint8Array.from(account.dek), {
 		header: account.header,
 		body: { ...account.body, segments: [] },
@@ -42,12 +45,24 @@ beforeEach(() => {
 });
 
 describe('listing', () => {
-	it('follows the index and the filters', () => {
-		index.add('s1', [record('a', { labels: ['sent'] }), record('b')]);
+	it('follows the index, the query, the order and the shards', () => {
+		index.add('s1', [
+			record('a', { labels: ['sent'] }),
+			record('b', { date: '2026-09-01T00:00:00Z' })
+		]);
 
 		expect(view.listing.map((t) => t.id)).toEqual(['a@x', 'b@x']);
-		view.filters = { sent: true, attachments: false };
+		view.query = 'is:sent';
 		expect(view.listing.map((t) => t.id)).toEqual(['a@x']);
+		view.query = '';
+		view.order = 'oldest';
+		expect(view.listing.map((t) => t.id)).toEqual(['b@x', 'a@x']);
+
+		view.query = 'budget';
+		expect(view.listing).toEqual([]);
+		terms.add('s1', [{ version: INDEX_VERSION, prefix: 'b', terms: { budget: [['b', 4, 1]] } }]);
+		expect(view.listing.map((t) => t.id)).toEqual(['b@x']);
+		expect(view.years).toEqual([2026]);
 	});
 });
 

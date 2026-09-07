@@ -8,6 +8,8 @@ import { fixture } from '$lib/mail/message.test';
 import { importState } from '$lib/state/import.svelte';
 import { index } from '$lib/state/index.svelte';
 import { session } from '$lib/state/session.svelte';
+import { terms } from '$lib/state/terms.svelte';
+import { MemoryCache } from '$lib/cache/blobs';
 import { createTestAccount, mockApi, type MockApi, type TestAccount } from '$lib/testing/account';
 import { inlineParser, ParserClosedError } from './parser';
 import { MAX_FILE_BYTES, runImport, SEGMENT_MESSAGES } from './run';
@@ -16,6 +18,7 @@ import type { ImportFile } from './sources';
 let api: MockApi;
 let account: TestAccount;
 let stored: Map<string, Uint8Array>;
+let cache: MemoryCache;
 
 async function files(...names: string[]): Promise<ImportFile[]> {
 	return Promise.all(
@@ -27,13 +30,15 @@ async function files(...names: string[]): Promise<ImportFile[]> {
 }
 
 function run(list: ImportFile[], signal = new AbortController().signal) {
-	return runImport(list, 'test', { api, parser: inlineParser(), signal });
+	return runImport(list, 'test', { api, cache, parser: inlineParser(), signal });
 }
 
 beforeEach(() => {
 	session.lock();
 	index.clear();
+	terms.clear();
 	importState.reset();
+	cache = new MemoryCache();
 	api = mockApi();
 	account = createTestAccount();
 	session.unlock(Uint8Array.from(account.dek), {
@@ -105,6 +110,11 @@ describe('runImport', () => {
 		}
 		expect(session.manifest?.body.segments).toEqual([segment]);
 		expect(index.messages).toBe(3);
+
+		// The shards are searchable at once and cached with the index for the next unlock.
+		expect(terms.segments).toEqual(new Set([segment.id]));
+		expect(terms.index.lookup('charging').length).toBeGreaterThan(0);
+		expect([...cache.entries.keys()].sort()).toEqual([segment.id, ...segment.shards].sort());
 	});
 
 	it('skips messages the archive holds, by bytes or by headers', async () => {

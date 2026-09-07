@@ -2,26 +2,59 @@
   The shell: the wordmark, the warnings that apply everywhere and the
   screen. After unlock the wordmark grows into the toolbar with search,
   Import, Settings and Lock, the import panel and the whole page as a drop
-  target come with it, and toasts report what finished.
+  target come with it, and toasts report what finished. The search box
+  edits the shared query directly, so the chips see every keystroke; the
+  URL follows a moment after typing stops, and a change of the URL from
+  elsewhere (back, a link) resets the query.
 -->
 <script lang="ts">
 	import '$lib/styles/app.css';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import type { ResolvedPathname } from '$app/types';
 	import { lock } from '$lib/account/unlock';
-	import { unlockUrl } from '$lib/app/navigation';
+	import { archiveSearch, unlockUrl } from '$lib/app/navigation';
 	import { cancelImport, startImport } from '$lib/import/start';
 	import type { ImportFile } from '$lib/import/sources';
 	import { Banner, DropOverlay, ImportPanel, SearchField, Toasts, Toolbar } from '$lib/components';
 	import { isInsecureContext } from '$lib/crypto/random';
 	import { archive } from '$lib/state/archive.svelte';
 	import { importState } from '$lib/state/import.svelte';
+	import { index } from '$lib/state/index.svelte';
 	import { session } from '$lib/state/session.svelte';
+	import { view } from '$lib/state/view.svelte';
+	import { parseOrder } from '$lib/search/search';
 
 	let { children } = $props();
 	const insecure = isInsecureContext();
-	let query = $state('');
 	const unlocked = $derived(session.status === 'unlocked');
+	const SEARCH_DELAY = 150;
+
+	// What the URL last said; a change there (back, a chip, a link) resets
+	// the query, while the query's own pushes are recognised and left alone.
+	let seen = '';
+	$effect(() => {
+		const q = page.url.searchParams.get('q') ?? '';
+		view.order = parseOrder(page.url.searchParams.get('order'));
+		if (q === seen) return;
+		seen = q;
+		view.query = q;
+	});
+
+	$effect(() => {
+		const typed = view.query;
+		if (typed.trim() === seen.trim() || !unlocked) return;
+		const timer = setTimeout(() => {
+			seen = typed.trim();
+			const onArchive = page.route.id?.startsWith('/(archive)') === true;
+			const path = onArchive ? page.url.pathname : '/';
+			void goto(`${path}${archiveSearch(typed, view.order)}` as ResolvedPathname, {
+				replaceState: onArchive,
+				keepFocus: true
+			});
+		}, SEARCH_DELAY);
+		return () => clearTimeout(timer);
+	});
 
 	async function lockArchive(): Promise<void> {
 		// A running import commits what it finished before the keys go.
@@ -57,7 +90,7 @@
 			importing={importState.active ? importState.percent : null}
 		>
 			{#snippet search()}
-				<SearchField bind:value={query} disabled />
+				<SearchField bind:value={view.query} disabled={index.messages === 0} />
 			{/snippet}
 		</Toolbar>
 	{:else}

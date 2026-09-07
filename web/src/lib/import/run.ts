@@ -9,7 +9,7 @@
 import { blobId, encryptBlob, encryptBlobAs } from '$lib/crypto/blob';
 import type { Subkeys } from '$lib/crypto/keys';
 import type { SegmentRef } from '$lib/crypto/manifest';
-import type { Api } from '$lib/account/deps';
+import { defaultDeps, type Api } from '$lib/account/deps';
 import { call, LockedError } from '$lib/account/errors';
 import { commitSegment } from '$lib/account/segments';
 import { ApiError } from '$lib/api/types';
@@ -21,6 +21,8 @@ import type { Term } from '$lib/mail/tokenize';
 import { index } from '$lib/state/index.svelte';
 import { importState } from '$lib/state/import.svelte';
 import { session } from '$lib/state/session.svelte';
+import { terms } from '$lib/state/terms.svelte';
+import type { BlobCache } from '$lib/cache/blobs';
 import { ParserClosedError, type Parser } from './parser';
 import type { ImportFile } from './sources';
 
@@ -41,6 +43,8 @@ export interface ImportSummary {
 
 export interface RunDeps {
 	api: Api;
+	/** Defaults to the app's cache; what this run writes is read from it later. */
+	cache?: BlobCache;
 	parser: Parser;
 	signal: AbortSignal;
 }
@@ -53,7 +57,7 @@ interface Batch {
 export async function runImport(
 	files: ImportFile[],
 	label: string,
-	{ api, parser, signal }: RunDeps
+	{ api, cache = defaultDeps.cache, parser, signal }: RunDeps
 ): Promise<ImportSummary> {
 	const keys = session.keys;
 	if (session.status !== 'unlocked' || keys === null || session.manifest === null) {
@@ -82,7 +86,7 @@ export async function runImport(
 		batch = { records: [], terms: [] };
 		writing = writing.then(async () => {
 			if (full.records.length === 0 || session.status !== 'unlocked') return;
-			segments.push(await writeSegment(keys, api, full));
+			segments.push(await writeSegment(keys, api, cache, full));
 		});
 	};
 
@@ -201,10 +205,11 @@ export async function runImport(
 async function writeSegment(
 	keys: Subkeys,
 	api: Api,
-	{ records, terms }: Batch
+	cache: BlobCache,
+	{ records, terms: termsOf }: Batch
 ): Promise<SegmentRef> {
 	const indexBlob = await encodeSegmentIndex(keys, records);
-	const shards = groupShards(indexBlob.id, keys, terms);
+	const shards = groupShards(indexBlob.id, keys, termsOf);
 	const shardIds = [...shards.keys()];
 	const pending = [...shards.entries()];
 	importState.writing = { done: 0, total: pending.length + 1 };
@@ -212,6 +217,7 @@ async function writeSegment(
 		for (let entry = pending.shift(); entry !== undefined; entry = pending.shift()) {
 			const sealed = await encodeShard(keys, entry[0], entry[1]);
 			await call(api.putBlob(entry[0], sealed.sealed));
+			await cache.put(entry[0], sealed.sealed);
 			importState.writing = {
 				done: importState.writing.done + 1,
 				total: importState.writing.total
@@ -220,6 +226,7 @@ async function writeSegment(
 	};
 	await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pending.length) }, upload));
 	await call(api.putBlob(indexBlob.id, indexBlob.sealed));
+	await cache.put(indexBlob.id, indexBlob.sealed);
 	const segment: SegmentRef = {
 		id: indexBlob.id,
 		createdAt: new Date().toISOString(),
@@ -228,6 +235,7 @@ async function writeSegment(
 	};
 	await commitSegment(segment, { api });
 	index.add(segment.id, records);
+	terms.add(segment.id, [...shards.values()]);
 	importState.writing = { done: importState.writing.total, total: importState.writing.total };
 	return segment;
 }
