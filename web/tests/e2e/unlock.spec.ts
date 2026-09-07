@@ -37,7 +37,7 @@ test.afterAll(async () => {
 test('the empty archive shows the import prompt under the toolbar', async () => {
 	await expect(page.getByRole('heading', { name: 'The archive is empty' })).toBeVisible();
 	await expect(page.getByText('0 messages')).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Import messages' })).toBeDisabled();
+	await expect(page.getByRole('button', { name: 'Import messages' })).toBeEnabled();
 	const toolbar = page.getByRole('navigation', { name: 'Archive' });
 	await expect(toolbar.getByRole('button', { name: 'Lock' })).toBeVisible();
 	await expect(page.getByRole('searchbox', { name: 'Search' })).toBeDisabled();

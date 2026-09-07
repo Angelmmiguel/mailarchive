@@ -1,0 +1,58 @@
+Return-Path: <bounces+123-abc=hidden@example.test>
+Delivered-To: reader@example.org
+Authentication-Results: mx.example.org (dis=neutral; info=dmarc domain policy);
+	dmarc=pass (dis=neutral p=quarantine) header.from=example.test;
+	dkim=pass header.d=example.test header.s=s1 header.b=abcd
+Received: from mail.example.test ([10.0.0.14])
+        by mx.example.org
+        with SMTP (SubEthaSMTP 3.1.7) id ABCDEFG
+        for reader@example.org;
+        Sun, 06 Sep 2026 11:12:43 +0200 (CEST)
+Date: Wed, 02 Sep 2026 07:21:48 +0000 (UTC)
+From: Wallbox <no-reply@wallbox.example.test>
+Mime-Version: 1.0
+Message-ID: <HWnqaDLqScir3bd-3iy5ag@geopod-ismtpd-12>
+Subject: Your charging summary report is ready
+To: reader@example.org
+Content-Type: multipart/related; boundary="------------79Bu5A16qPEYcVIZL@fixture"
+
+--------------79Bu5A16qPEYcVIZL@fixture
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+SGksPC9wPjxwPllvdXIgY2hhcmdpbmcgc3VtbWFyeSByZXBvcnQgZm9y
+IEF1Z3VzdCBpcyBhdHRhY2hlZC48L3A+PHA+VG90YWwgZW5lcmd5OiAxODQga1doIG92ZXIgMTIg
+c2Vzc2lvbnMuPC9wPjxpbWcgc3JjPSJjaWQ6bG9nb0BmaXh0dXJlIiBhbHQ9ImxvZ28iPjwvYm9k
+eT48L2h0bWw+
+--------------79Bu5A16qPEYcVIZL@fixture
+Content-Type: image/png; name="logo.png"
+Content-Transfer-Encoding: base64
+Content-ID: <logo@fixture>
+Content-Disposition: inline; filename="logo.png"
+
+wolQTkcNChoKbm90IHJlYWxseSBhIHBuZw==
+--------------79Bu5A16qPEYcVIZL@fixture
+Content-Type: application/pdf;
+	name="charging-summary-august.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment;
+	filename="charging-summary-august.pdf"
+
+JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCiUlRU9GCiVQREYtMS40CjEg
+MCBvYmo8PC9UeXBlL0NhdGFsb2c+PmVuZG9iagolJUVPRgolUERGLTEuNAoxIDAgb2JqPDwvVHlw
+ZS9DYXRhbG9nPj5lbmRvYmoKJSVFT0YKJVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+
+ZW5kb2JqCiUlRU9GCiVQREYtMS40CjEgMCBvYmo8PC9UeXBlL0NhdGFsb2c+PmVuZG9iagolJUVP
+RgolUERGLTEuNAoxIDAgb2JqPDwvVHlwZS9DYXRhbG9nPj5lbmRvYmoKJSVFT0YKJVBERi0xLjQK
+MSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCiUlRU9GCiVQREYtMS40CjEgMCBvYmo8PC9U
+eXBlL0NhdGFsb2c+PmVuZG9iagolJUVPRgolUERGLTEuNAoxIDAgb2JqPDwvVHlwZS9DYXRhbG9n
+Pj5lbmRvYmoKJSVFT0YKJVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCiUl
+RU9GCiVQREYtMS40CjEgMCBvYmo8PC9UeXBlL0NhdGFsb2c+PmVuZG9iagolJUVPRgolUERGLTEu
+NAoxIDAgb2JqPDwvVHlwZS9DYXRhbG9nPj5lbmRvYmoKJSVFT0YKJVBERi0xLjQKMSAwIG9iajw8
+L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCiUlRU9GCiVQREYtMS40CjEgMCBvYmo8PC9UeXBlL0NhdGFs
+b2c+PmVuZG9iagolJUVPRgolUERGLTEuNAoxIDAgb2JqPDwvVHlwZS9DYXRhbG9nPj5lbmRvYmoK
+JSVFT0YKJVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCiUlRU9GCiVQREYt
+MS40CjEgMCBvYmo8PC9UeXBlL0NhdGFsb2c+PmVuZG9iagolJUVPRgolUERGLTEuNAoxIDAgb2Jq
+PDwvVHlwZS9DYXRhbG9nPj5lbmRvYmoKJSVFT0YKJVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0
+YWxvZz4+ZW5kb2JqCiUlRU9GCiVQREYtMS40CjEgMCBvYmo8PC9UeXBlL0NhdGFsb2c+PmVuZG9i
+agolJUVPRgo=
+--------------79Bu5A16qPEYcVIZL@fixture--

@@ -1,0 +1,37 @@
+Return-Path: <bounces+123-abc=hidden@example.test>
+Delivered-To: reader@example.org
+Authentication-Results: mx.example.org (dis=neutral; info=dmarc domain policy);
+	dmarc=pass (dis=neutral p=quarantine) header.from=example.test;
+	dkim=pass header.d=example.test header.s=s1 header.b=abcd
+Received: from mail.example.test ([10.0.0.14])
+        by mx.example.org
+        with SMTP (SubEthaSMTP 3.1.7) id ABCDEFG
+        for reader@example.org;
+        Sun, 06 Sep 2026 11:12:43 +0200 (CEST)
+Received-SPF: Pass (mailfrom) identity=mailfrom; client-ip=192.0.2.10; helo=outbound.example.test
+X-Some-Vendor-Score: 2.33303322422
+Dkim-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.test; s=s1;
+	bh=2SYYce/H/gmi5eaAwJmzrfaeRDg5uRagsnA6cUwXO3M=; h=From:To:Subject;
+	b=jKvs9dKLQrySL3Ew5lFU4rCajep+dlik0xCF4DZJKtG2JuN+K+n64SQOJx9HxThci3kL
+Content-Transfer-Encoding: quoted-printable
+Date: Sun, 06 Sep 2026 09:12:32 +0000 (UTC)
+From: Ineffable Roasters <news_alias_r9z2ccjdx363mn@relay.example.test>
+Mime-Version: 1.0
+Message-ID: <6BhDGbtpS4yIS8fcac4iTw@geopod-ismtpd-13>
+Subject: =?UTF-8?B?VGFibMOzbiBkZSBHw7NtZXogUHJvamVjdCDwn4eo8J+HtA==?=
+Reply-To: news_alias_r9z2ccjdx363mn@relay.example.test
+To: Hide My Email <alias.02garras@relay.example.org>
+Content-Type: multipart/related; boundary="------------79Bu5A16qPEYcVIZL@fixture"
+
+--------------79Bu5A16qPEYcVIZL@fixture
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHNwYW4gc3R5bGU9ImRpc3BsYXk6bm9uZTtmb250LXNpemU6MXB4Ij5VbiBI
+b25leSBkZSBOYXJpw7FvIGVsZWdhbnRlIHkgZXhwcmVzaXZvzY8g4oCMICZuYnNwOyDCrTwvc3Bh
+bj48dGFibGU+PHRyPjx0ZD48aW1nIGFsdD0iIiBzcmM9Imh0dHBzOi8vZXhhbXBsZS50ZXN0L3Qv
+bz91PWFiYyI+PGgxPlRhYmzDs24gZGUgR8OzbWV6IFByb2plY3Q8L2gxPjxwPlVuIGNhZsOpIGNv
+biBhemFoYXIsIGZydXRvcyBkZWwgYm9zcXVlIHkgdW5hIGRlbGljYWRhIGR1bHp1cmEgYSBtaWVs
+LjwvcD48YSBocmVmPSJodHRwczovL2V4YW1wbGUudGVzdC9zaG9wIj5Db21wcmFyIGFob3JhPC9h
+PjwvdGQ+PC90cj48L3RhYmxlPjwvYm9keT48L2h0bWw+
+--------------79Bu5A16qPEYcVIZL@fixture--

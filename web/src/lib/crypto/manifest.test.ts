@@ -27,7 +27,7 @@ const manifest: Manifest = {
 	},
 	body: {
 		settings: { ownAddresses: ['me@example.com', 'me@example.org'] },
-		segments: [{ id: 'a'.repeat(64), createdAt: '2026-09-06T10:00:00Z', messages: 12 }]
+		segments: [{ id: 'a'.repeat(64), createdAt: '2026-09-06T10:00:00Z', messages: 12, shards: [] }]
 	}
 };
 

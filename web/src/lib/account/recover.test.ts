@@ -100,10 +100,12 @@ describe('recover', () => {
 	});
 
 	it('rejects a phrase with a typo before touching the server', async () => {
-		const words = account.recoveryPhrase.split(' ');
-		words[3] = words[3] === 'abandon' ? 'ability' : 'abandon';
+		// Swapping a word of the real phrase would pass the 8-bit checksum
+		// once in 256 runs; this phrase is a known failure (its valid form
+		// ends in "art").
+		const typo = Array.from({ length: 24 }, () => 'abandon').join(' ');
 
-		await expect(recover(words.join(' '), NEW_PASSPHRASE, tinyDeps(api))).rejects.toThrow(
+		await expect(recover(typo, NEW_PASSPHRASE, tinyDeps(api))).rejects.toThrow(
 			InvalidRecoveryPhraseError
 		);
 		expect(callOrder(api)).toEqual([]);

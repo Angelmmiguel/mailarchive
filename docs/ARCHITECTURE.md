@@ -68,11 +68,15 @@ Each message produces two blobs:
 
 | kind | content                                                       | fetched when              |
 |------|---------------------------------------------------------------|---------------------------|
-| raw  | original `.eml`, byte-exact, zstd-compressed                   | export, attachment download, view source |
-| view | parsed headers, text body, sanitized HTML, attachment metadata | opening a message         |
+| raw  | original `.eml`, byte-exact, gzip-compressed                   | export, attachment download, view source |
+| view | parsed headers, text body, HTML as sent, attachment metadata   | opening a message         |
 
 The raw blob is the archival truth. The view blob is derived and can be
-regenerated from raw by any client that holds the key. Attachments are not
+regenerated from raw by any client that holds the key. Both are gzip-compressed
+before sealing, through the browser's native streams (zstd would need a WASM
+dependency for no gain the server could see). The HTML in the view is stored as
+the sender wrote it and sanitized where it is rendered, so a stricter sanitizer
+later applies to old messages too. Attachments are not
 stored separately: downloading one fetches the raw blob, decrypts it in the
 browser and extracts the MIME part. This keeps storage at roughly the size of
 the original dump at the cost of a larger download per attachment.
@@ -81,7 +85,9 @@ the original dump at the cost of a larger download per attachment.
 
 One record per message, a few hundred bytes each: message id, date, from, to,
 cc, subject, snippet, thread id, labels, size, attachment list (name, type,
-size, MIME part path), and pointers to the raw and view blobs.
+size, part index), and pointers to the raw and view blobs. The manifest entry
+for a segment lists the ids of its term shards, since the server cannot relate
+a shard to its segment.
 
 ### Term shards
 
@@ -162,8 +168,11 @@ DEK, 32 random bytes, protects the whole archive
   blob under another id; wrapped DEKs and the manifest body use the AAD
   strings above.
 - **Ids** are `HMAC-SHA256(id key, SHA-256(plaintext))` for blobs and
-  `HMAC-SHA256(id key, prefix)` for term shards. Deterministic, so identical
-  messages deduplicate, but meaningless without the id key.
+  `HMAC-SHA256(id key, "<segment id>/<prefix>")` for term shards.
+  Deterministic, so identical messages deduplicate, but meaningless without
+  the id key. A raw blob is named by the original `.eml` bytes even though
+  what is sealed under that name is their gzip; a view or index blob is named
+  by the compressed bytes it seals.
 - **Cache key** encrypts the local IndexedDB cache. It derives from the DEK, so
   the cache is unreadable without unlocking.
 
@@ -222,27 +231,33 @@ sizes to fixed buckets is a cheap future hardening.
 
 ## Import pipeline (browser)
 
-1. User selects `.eml` files or a folder. Files are streamed one at a time
-   through a Web Worker, never held all in memory.
-2. Each file is parsed (MIME, headers, parts). Own-address matching, threading,
-   snippet extraction and tokenization run here.
+1. User selects `.eml` files or a folder, or drops either on the page. Files
+   go a few at a time through a Web Worker, never held all in memory.
+2. Each file is parsed (MIME, headers, parts) by postal-mime, wrapped behind
+   the archive's own message type. Snippet extraction, tokenization and
+   compression run in the worker; naming, sealing, own-address matching and
+   threading on the main thread, which is the only place keys exist.
 3. Compute the message id from the raw bytes. **Dedup runs against the merged
    index already in memory**, not against blob existence: if the id is known,
-   the message is skipped entirely and produces no new index record. The
-   reader additionally collapses records sharing a `Message-ID` header, which
-   covers a provider re-export that altered transport headers.
-4. For messages that are new, ask the server which blob ids already exist and
-   skip uploading those bytes. This is only an optimization for recovering
-   from a previously interrupted import.
-5. Encrypt and upload the raw and view blobs.
-6. When the batch finishes, encrypt and upload the segment index and its term
-   shards, then update the manifest with `If-Match` on its ETag. If another
-   device changed the manifest meanwhile, refetch, merge the segment list,
-   retry.
+   the message is skipped entirely and produces no new index record. A
+   parsed message whose `Message-ID`, `Date` and `From` match a record is
+   skipped too, which covers a provider re-export that altered transport
+   headers; all three must match because some clients reuse ids.
+4. Encrypt and upload the raw and view blobs. A blob the server already has
+   answers 409, which the client treats as stored; that is how an
+   interrupted import resumes without a separate existence check.
+5. Every few thousand messages, and once more when the run ends, encrypt and
+   upload a segment index and its term shards, then update the manifest with
+   `If-Match` on its ETag. If another device changed the manifest meanwhile,
+   refetch, merge the segment list, retry. Bounding the segment keeps every
+   blob well under the server's cap and means a long run cannot lose
+   everything at the end.
 
-A batch that fails mid-way leaves orphan blobs but no dangling segment. Orphans
-are harmless and can be garbage-collected later by a client-side job that
-compares the manifest against the server listing.
+A run that is cancelled or stopped by a failure still writes a segment for the
+messages it finished, so nothing uploaded has to be imported again. A crash
+mid-way leaves orphan blobs but no dangling segment. Orphans are harmless and
+can be garbage-collected later by a client-side job that compares the manifest
+against the server listing.
 
 ## Reading, cache and search
 

@@ -178,11 +178,16 @@ export async function headBlob(id: string): Promise<boolean> {
  * Stores a blob. Blobs are write-once, so a taken id is a normal outcome and
  * reported as 'exists' rather than thrown.
  */
-export async function putBlob(id: string, data: Bytes): Promise<PutBlobResult> {
+export async function putBlob(
+	id: string,
+	data: Bytes,
+	signal?: AbortSignal
+): Promise<PutBlobResult> {
 	const res = await send(blobPath(id), {
 		method: 'PUT',
 		headers: { 'Content-Type': octetStream },
-		body: data
+		body: data,
+		signal
 	});
 	if (res.status === 409) return 'exists';
 	if (!res.ok) return fail(res);

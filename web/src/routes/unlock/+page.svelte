@@ -15,11 +15,15 @@
 		ServerUnreachableError,
 		WrongPassphraseError
 	} from '$lib/account/errors';
+	import { openIndex } from '$lib/account/segments';
+	import { indexProblem } from '$lib/app/boot';
 	import { unlock } from '$lib/account/unlock';
 	import { PassphraseTooLongError, PassphraseTooShortError } from '$lib/crypto/kdf';
 	import { returnPath } from '$lib/app/navigation';
-	import { Banner, Button, Field, Notice, Step } from '$lib/components';
+	import { Banner, Button, Field, Notice, ProgressPanel, Step } from '$lib/components';
 	import { archive } from '$lib/state/archive.svelte';
+	import { index } from '$lib/state/index.svelte';
+	import { toasts } from '$lib/state/toasts.svelte';
 	import { session } from '$lib/state/session.svelte';
 
 	let passphrase = $state('');
@@ -33,9 +37,12 @@
 	const notSetUp = $derived(archive.health !== null && !archive.health.setup);
 	const ready = $derived(passphrase !== '' && !working);
 
+	// The index is decrypted here rather than on the archive so that a
+	// reload that resumes the session gets the same treatment.
 	$effect(() => {
-		if (session.status === 'unlocked') void goto(next, { replaceState: true });
-		else if (notSetUp) void goto(resolve('/setup'), { replaceState: true });
+		if (session.status === 'unlocked' && index.loading === null) {
+			void goto(next, { replaceState: true });
+		} else if (notSetUp) void goto(resolve('/setup'), { replaceState: true });
 	});
 
 	async function submit(event: SubmitEvent): Promise<void> {
@@ -46,6 +53,11 @@
 		try {
 			await unlock(passphrase);
 			passphrase = '';
+			try {
+				await openIndex();
+			} catch (e) {
+				toasts.push({ tone: 'danger', label: 'index', message: indexProblem(e) }, 0);
+			}
 		} catch (e) {
 			// A passphrase outside the accepted length cannot be the right one, and
 			// saying which limit it broke would give a guesser a hint.
@@ -74,6 +86,15 @@
 	</Banner>
 {:else if reason === 'expired'}
 	<Banner tone="accent">Your session expired. Unlock again to continue where you were.</Banner>
+{/if}
+{#if index.loading !== null}
+	<ProgressPanel
+		title="Decrypting index"
+		done={index.loading.done}
+		total={index.loading.total}
+		detail="segment {index.loading.done} of {index.loading
+			.total} · {index.messages.toLocaleString()} messages"
+	/>
 {/if}
 <Step step={1} total={1} title="Unlock" counter={false}>
 	{#snippet lead()}

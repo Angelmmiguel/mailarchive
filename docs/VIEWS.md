@@ -85,13 +85,14 @@ download it.
 ## Import
 
 ### Import (panel over Archive)
-Drop zone or folder picker for `.eml` files. Once files are chosen, the panel
-turns into a progress view with counts for parsed, uploaded, skipped as
-duplicates and failed, an estimate, and a cancel button. The user can close
-the panel and keep browsing; a small progress indicator in the shell reopens
-it. Ends with a summary and a link to the newly imported messages.
-Errors: a file that does not parse (listed, import continues), session
-expired (Unlock, then resume), server unreachable (pause and retry).
+Drop zone or pickers for `.eml` files and folders; the whole page is a drop
+target too. Once files are chosen, the panel turns into a progress view with
+counts for parsed, uploaded, skipped as duplicates and failed, an estimate,
+and a cancel button. The user can close the panel and keep browsing; the
+Import button in the shell shows the percent and reopens it. Ends with a
+summary toast and a link to the archive. Cancelling keeps what finished.
+Errors: a file that does not parse (listed, import continues), a server
+failure (the run stops, what finished is kept, the panel says why).
 
 ## Settings
 
@@ -141,5 +142,22 @@ Things the account layer cannot handle on its own and the screens must.
   passphrase (there is no index to decrypt), the attempts-left count in the
   wrong-passphrase message (the server does not report it; the rate-limited
   message asks to wait a minute, the default window), the no-results state
-  of Archive (it belongs to the list), and Import, whose button the empty
-  archive shows disabled. Recover is a placeholder that Unlock links to.
+  of Archive (it belongs to the list). Recover is a placeholder that Unlock
+  links to.
+- **Import lives in the shell.** The panel, the page-wide drop target and the
+  toasts are mounted by the layout once the session is unlocked, so a run
+  keeps going while the user moves between views. `lib/import/start.ts`
+  owns the run: it refuses a second selection while one is running, warns
+  through `beforeunload` until the run ends, and turns the outcome into the
+  summary toast. Lock waits for a running import to cancel and commit what
+  it finished before the keys go; a session that expires mid-run leaves the
+  uploaded blobs on the server, reports it, and goes to Unlock.
+- **The index is decrypted at Unlock and at boot.** Both call `openIndex`
+  after the session opens; Unlock shows the decrypting panel meanwhile. A
+  segment the server lost is reported as a toast and the archive opens with
+  the rest, so one missing blob never locks the user out.
+- **Fixtures are synthetic.** `web/tests/fixtures` holds `.eml` files modelled
+  on real provider exports (a base64 HTML newsletter with an encoded subject,
+  a report with an inline logo and a PDF in a `multipart/related` container,
+  a plain-text reply, a re-export with other transport headers, and two files
+  that are not mail) without anyone's real addresses.

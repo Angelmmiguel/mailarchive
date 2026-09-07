@@ -22,6 +22,15 @@ export function encryptBlob(keys: Subkeys, plaintext: Uint8Array): { id: string;
 	return { id, sealed: seal(keys.blob, plaintext, id) };
 }
 
+/**
+ * Seals a blob under a name chosen by the caller: a raw message named by
+ * its original bytes though the sealed content is compressed, or a term
+ * shard named by its prefix.
+ */
+export function encryptBlobAs(keys: Subkeys, id: string, plaintext: Uint8Array): Bytes {
+	return seal(keys.blob, plaintext, id);
+}
+
 /** Opens a blob fetched under `id`. */
 export function decryptBlob(keys: Subkeys, id: string, sealed: Uint8Array): Bytes {
 	return open(keys.blob, sealed, id);

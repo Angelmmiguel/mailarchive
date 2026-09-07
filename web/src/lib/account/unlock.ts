@@ -8,7 +8,10 @@ import { deriveSubkeys, unwrapDek, zeroSubkeys } from '$lib/crypto/keys';
 import { decodeManifestBody, decodeManifestHeader } from '$lib/crypto/manifest';
 import { clearPersistedDek, persistDek, resumeDek } from '$lib/crypto/persist';
 import { zero } from '$lib/crypto/random';
+import { importState } from '$lib/state/import.svelte';
+import { index } from '$lib/state/index.svelte';
 import { session, type SessionManifest } from '$lib/state/session.svelte';
+import { toasts } from '$lib/state/toasts.svelte';
 import { defaultDeps, type Api, type Deps } from './deps';
 import { call, callAs, MissingManifestError, WrongPassphraseError } from './errors';
 
@@ -65,6 +68,9 @@ export async function resume(
  */
 export async function lock(deps: Deps = defaultDeps): Promise<void> {
 	session.lock();
+	index.clear();
+	importState.reset();
+	toasts.clear();
 	clearPersistedDek();
 	try {
 		await deps.api.logout();

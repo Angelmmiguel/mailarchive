@@ -104,7 +104,7 @@ export function createTestAccount(passphrase = PASSPHRASE): TestAccount {
 	};
 	const body: ManifestBody = {
 		settings: { ownAddresses: ['me@example.com'] },
-		segments: [{ id: 'f'.repeat(64), createdAt: '2026-09-01T00:00:00Z', messages: 3 }]
+		segments: [{ id: 'f'.repeat(64), createdAt: '2026-09-01T00:00:00Z', messages: 3, shards: [] }]
 	};
 	return {
 		dek,

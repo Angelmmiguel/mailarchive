@@ -23,11 +23,16 @@ export interface ManifestHeader {
 	wrapped: { passphrase: string; recovery: string };
 }
 
-/** One import run. Placeholder shape until the import pipeline lands. */
+/**
+ * One import run: the blob holding its index, when it was made, how many
+ * messages it holds and the blobs holding its term shards. The shards are
+ * listed because the server cannot relate a shard to its segment.
+ */
 export interface SegmentRef {
 	id: string;
 	createdAt: string;
 	messages: number;
+	shards: string[];
 }
 
 /** The part of the manifest sealed under the manifest key. */
@@ -157,13 +162,16 @@ function parseSegments(value: unknown): SegmentRef[] {
 		if (entry === null || typeof entry !== 'object') {
 			throw new ManifestFormatError(`segments[${i}] is not an object`);
 		}
-		const { id, createdAt, messages }: Record<string, unknown> = { ...entry };
+		const { id, createdAt, messages, shards = [] }: Record<string, unknown> = { ...entry };
 		if (typeof id !== 'string' || typeof createdAt !== 'string') {
 			throw new ManifestFormatError(`segments[${i}] has a malformed id or createdAt`);
 		}
 		if (typeof messages !== 'number' || !Number.isInteger(messages) || messages < 0) {
 			throw new ManifestFormatError(`segments[${i}].messages is not a count`);
 		}
-		return { id, createdAt, messages };
+		if (!Array.isArray(shards) || !shards.every((s) => typeof s === 'string')) {
+			throw new ManifestFormatError(`segments[${i}].shards is not a list of ids`);
+		}
+		return { id, createdAt, messages, shards };
 	});
 }

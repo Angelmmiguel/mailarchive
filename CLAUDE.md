@@ -45,7 +45,8 @@ just web-e2e # account flows and the Playwright specs against throwaway servers
 `just test` and `just lint` must be clean before work is considered done,
 along with `gofmt -l .` printing nothing; run `just web-e2e` when a change
 touches a screen or an account flow. Browser specs live in `web/tests/e2e`,
-one file per scenario that needs a never-set-up server; the browsers come from
+one file per scenario that needs a never-set-up server, with synthetic `.eml`
+fixtures in `web/tests/fixtures` (never real mail); the browsers come from
 the flake, so `@playwright/test` must match `playwright-driver` in nixpkgs.
 Web-only variants exist as `web-install`, `web-dev`, `web-check`, `web-test` and `web-build`.
 
