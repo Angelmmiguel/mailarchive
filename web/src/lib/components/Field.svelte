@@ -41,7 +41,7 @@
 	</span>
 	{#if below}{@render below()}{/if}
 	{#if error !== null}
-		<span class="message error" id={messageId}>{error}</span>
+		<span class="message error" id={messageId} role="alert">{error}</span>
 	{:else if hint !== undefined}
 		<span class="message" id={messageId}>{hint}</span>
 	{/if}

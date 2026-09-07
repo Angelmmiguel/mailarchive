@@ -23,6 +23,8 @@ class Index {
 	loading = $state<IndexProgress | null>(null);
 
 	messages = $derived(this.records.length);
+	/** Size of every original message, which is roughly what the server stores. */
+	bytes = $derived(this.records.reduce((sum, r) => sum + r.size, 0));
 	/** Newest first. */
 	threads = $derived(groupThreads(this.records));
 	threadById = $derived(new Map(this.threads.map((t) => [t.id, t] as [string, Thread])));

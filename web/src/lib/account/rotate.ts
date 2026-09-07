@@ -30,8 +30,27 @@ export interface Change {
  * on the server. The caller owns `currentAuthKey` and zeroes it; the API
  * errors are left to the caller too, which wraps this in `callAs` since it
  * knows what credential it presented.
+ *
+ * Works on a private copy of the DEK: a lock while the new passphrase is
+ * being derived zeroes the session's buffer in place, and a manifest
+ * sealed under zeros would lose the archive.
  */
 export async function rekey(
+	deps: Deps,
+	sessionDek: Bytes,
+	current: SessionManifest,
+	change: Change,
+	currentAuthKey: Bytes
+): Promise<SessionManifest> {
+	const dek = Uint8Array.from(sessionDek);
+	try {
+		return await rekeyWith(deps, dek, current, change, currentAuthKey);
+	} finally {
+		zero(dek);
+	}
+}
+
+async function rekeyWith(
 	deps: Deps,
 	dek: Bytes,
 	current: SessionManifest,
@@ -92,11 +111,14 @@ export async function changePassphrase(
 	const { dek, manifest } = unlocked();
 	const currentAuthKey = await currentCredential(deps, currentPassphrase, manifest);
 	try {
-		session.manifest = await callAs(
+		stillOpen(dek);
+		const updated = await callAs(
 			rekey(deps, dek, manifest, { passphrase: newPassphrase }, currentAuthKey),
 			() => new WrongPassphraseError(),
 			'wrong_credential'
 		);
+		stillOpen(dek);
+		session.manifest = updated;
 	} finally {
 		zero(currentAuthKey);
 	}
@@ -115,11 +137,14 @@ export async function regenerateRecoveryKey(
 	const currentAuthKey = await currentCredential(deps, currentPassphrase, manifest);
 	const recoveryKey = generateRecoveryKey();
 	try {
-		session.manifest = await callAs(
+		stillOpen(dek);
+		const updated = await callAs(
 			rekey(deps, dek, manifest, { recoveryKey }, currentAuthKey),
 			() => new WrongPassphraseError(),
 			'wrong_credential'
 		);
+		stillOpen(dek);
+		session.manifest = updated;
 		return { recoveryPhrase: formatRecoveryKey(recoveryKey) };
 	} finally {
 		zero(currentAuthKey, recoveryKey);
@@ -141,6 +166,14 @@ async function currentCredential(
 	const { kek, authKey } = expandRoot(root);
 	zero(root, kek);
 	return authKey;
+}
+
+/**
+ * The flow awaits a derivation and a request; a lock meanwhile means the
+ * result must not be sent, or stored in a session that is now closed.
+ */
+function stillOpen(dek: Bytes): void {
+	if (session.status !== 'unlocked' || session.dek !== dek) throw new LockedError();
 }
 
 function unlocked(): { dek: Bytes; manifest: SessionManifest } {

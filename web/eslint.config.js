@@ -21,6 +21,12 @@ export default defineConfig(
 		}
 	},
 	{
+		// Type information lets the navigation rules recognise a resolved path
+		// built by a helper, in modules as well as in components.
+		files: ['src/**/*.ts'],
+		languageOptions: { parserOptions: { projectService: true } }
+	},
+	{
 		files: ['**/*.svelte', '**/*.svelte.ts', '**/*.svelte.js'],
 		languageOptions: {
 			parserOptions: {

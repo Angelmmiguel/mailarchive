@@ -193,6 +193,51 @@ describe('changePassphrase', () => {
 	});
 });
 
+describe('a lock during the flow', () => {
+	it('while the current passphrase is derived sends nothing', async () => {
+		deps.deriveRoot.mockImplementationOnce(async (passphrase, params) => {
+			session.lock();
+			return tinyDerive(passphrase, params);
+		});
+
+		await expect(changePassphrase(PASSPHRASE, NEW_PASSPHRASE, deps)).rejects.toThrow(LockedError);
+		expect(api.rekey).not.toHaveBeenCalled();
+	});
+
+	it('while the new passphrase is derived still wraps the real DEK', async () => {
+		const dek = Uint8Array.from(account.dek);
+		deps.deriveRoot
+			.mockImplementationOnce((passphrase, params) =>
+				Promise.resolve(tinyDerive(passphrase, params))
+			)
+			.mockImplementationOnce(async (passphrase, params) => {
+				session.lock();
+				return tinyDerive(passphrase, params);
+			});
+
+		await expect(changePassphrase(PASSPHRASE, NEW_PASSPHRASE, deps)).rejects.toThrow(LockedError);
+
+		// The server got a manifest the new passphrase can open.
+		const sent = sentRekey();
+		const header = decodeManifestHeader(sent.manifest);
+		const { kek } = expandRoot(tinyDerive(NEW_PASSPHRASE, header.kdf));
+		expect(unwrapDek(decodeBase64(header.wrapped.passphrase), kek, 'passphrase')).toEqual(dek);
+		expect(decodeManifestBody(sent.manifest, deriveSubkeys(dek).manifest)).toEqual(account.body);
+		expect(session.manifest).toBeNull();
+	});
+
+	it('while the request is out keeps nothing decrypted in the session', async () => {
+		api.rekey.mockImplementation(async () => {
+			session.lock();
+			return { etag: '"v2"' };
+		});
+
+		await expect(regenerateRecoveryKey(PASSPHRASE, deps)).rejects.toThrow(LockedError);
+		expect(session.status).toBe('locked');
+		expect(session.manifest).toBeNull();
+	});
+});
+
 describe('regenerateRecoveryKey', () => {
 	it('rekeys the recovery credential only and returns the new phrase', async () => {
 		let sentRecoveryAuthKey: Bytes | undefined;

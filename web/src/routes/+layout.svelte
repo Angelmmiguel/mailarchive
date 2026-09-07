@@ -12,8 +12,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { ResolvedPathname } from '$app/types';
-	import { lock } from '$lib/account/unlock';
-	import { archiveSearch, unlockUrl } from '$lib/app/navigation';
+	import { resolve } from '$app/paths';
+	import { leave, lockArchive } from '$lib/app/lock';
+	import { archiveSearch } from '$lib/app/navigation';
 	import { cancelImport, startImport } from '$lib/import/start';
 	import type { ImportFile } from '$lib/import/sources';
 	import { Banner, DropOverlay, ImportPanel, SearchField, Toasts, Toolbar } from '$lib/components';
@@ -56,20 +57,10 @@
 		return () => clearTimeout(timer);
 	});
 
-	async function lockArchive(): Promise<void> {
-		// A running import commits what it finished before the keys go.
-		await cancelImport();
-		await leave();
-	}
-
-	async function leave(reason?: 'expired'): Promise<void> {
-		const from = page.url.pathname + page.url.search;
-		await lock();
-		await goto(unlockUrl(from, reason));
-	}
+	const here = $derived(page.url.pathname + page.url.search);
 
 	function importFiles(files: ImportFile[]): void {
-		void startImport(files, { onexpired: () => void leave('expired') });
+		void startImport(files, { onexpired: () => void leave(here, 'expired') });
 	}
 </script>
 
@@ -85,8 +76,12 @@
 <div class="shell">
 	{#if unlocked}
 		<Toolbar
-			onlock={lockArchive}
+			onlock={() => lockArchive(here)}
 			onimport={() => (importState.panelOpen = !importState.panelOpen)}
+			onsettings={() => {
+				if (page.route.id !== '/settings') void goto(resolve('/settings'));
+			}}
+			settingsOpen={page.route.id === '/settings'}
 			importing={importState.active ? importState.percent : null}
 		>
 			{#snippet search()}

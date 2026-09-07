@@ -10,6 +10,7 @@ import { clearPersistedDek, persistDek, resumeDek } from '$lib/crypto/persist';
 import { zero } from '$lib/crypto/random';
 import { importState } from '$lib/state/import.svelte';
 import { index } from '$lib/state/index.svelte';
+import { onboarding } from '$lib/state/onboarding.svelte';
 import { session, type SessionManifest } from '$lib/state/session.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { view } from '$lib/state/view.svelte';
@@ -76,6 +77,7 @@ export async function lock(deps: Deps = defaultDeps): Promise<void> {
 	importState.reset();
 	toasts.clear();
 	view.reset();
+	onboarding.takeRecoveryPhrase();
 	forgetMessages();
 	clearPersistedDek();
 	try {

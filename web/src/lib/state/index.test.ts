@@ -29,6 +29,7 @@ describe('add', () => {
 		index.add('s2', [record('b'), record('c')]);
 
 		expect(index.messages).toBe(3);
+		expect(index.bytes).toBe(3);
 		expect(index.records.map((r) => r.id)).toEqual(['a', 'b', 'c']);
 		expect([...index.segments]).toEqual(['s1', 's2']);
 	});

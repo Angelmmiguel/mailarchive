@@ -108,10 +108,11 @@ failure (the run stops, what finished is kept, the panel says why).
 ## Settings
 
 ### Settings `/settings`
-Sections: own addresses (same editor as onboarding), change passphrase,
-regenerate recovery key (shows Recovery key again), archive statistics
-(messages, threads, storage used, segments), clear this device's cache, and
-Lock. Later: garbage collection, user-defined labels.
+Sections: own addresses (same editor as onboarding, saved when changed),
+change passphrase (asks for the current one), regenerate recovery key
+(asks for the current passphrase, shows Recovery key again), archive
+statistics (messages, threads, storage, segments), clear this device's
+cache, and Lock.
 
 ## Shell
 
@@ -178,8 +179,10 @@ Things the account layer cannot handle on its own and the screens must.
   passphrase (there is no index to decrypt), the attempts-left count in the
   wrong-passphrase message (the server does not report it; the rate-limited
   message asks to wait a minute, the default window). Recover is a
-  placeholder that Unlock links to. Settings, with clearing this device's
-  cache, is not built, so the cache only grows for now.
+  placeholder that Unlock links to.
+- **Lock is one function.** `lib/app/lock.ts` drops the keys and goes to
+  Unlock with the way back; the toolbar, Settings and an expired import
+  use it.
 - **Import lives in the shell.** The panel, the page-wide drop target and the
   toasts are mounted by the layout once the session is unlocked, so a run
   keeps going while the user moves between views. `lib/import/start.ts`

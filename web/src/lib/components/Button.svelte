@@ -82,8 +82,13 @@
 	}
 
 	.secondary:hover:enabled,
-	.ghost:hover:enabled {
+	.ghost:hover:enabled,
+	.ghost[aria-current='page'] {
 		background: var(--surface-inset);
+	}
+
+	.ghost[aria-current='page'] {
+		color: var(--text-body);
 	}
 
 	.accent {

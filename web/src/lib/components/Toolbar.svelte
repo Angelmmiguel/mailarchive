@@ -1,7 +1,8 @@
 <!--
   The bar above every view after unlock: the wordmark, the search entry and
   the actions. Import shows the running import's percent and reopens its
-  panel; Lock reports through `busy` while the server is told.
+  panel; Settings is marked as current while its screen is open; Lock
+  reports through `busy` while the server is told.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -13,10 +14,19 @@
 		importing?: number | null;
 		onimport?: () => void;
 		onsettings?: () => void;
+		/** Whether the Settings screen is the one open. */
+		settingsOpen?: boolean;
 		onlock: () => Promise<void> | void;
 	}
 
-	let { search, importing = null, onimport, onsettings, onlock }: Props = $props();
+	let {
+		search,
+		importing = null,
+		onimport,
+		onsettings,
+		settingsOpen = false,
+		onlock
+	}: Props = $props();
 	let locking = $state(false);
 
 	async function lock(): Promise<void> {
@@ -46,8 +56,11 @@
 		{:else}
 			<Button onclick={onimport} disabled={onimport === undefined}>Import</Button>
 		{/if}
-		<Button variant="ghost" onclick={onsettings} disabled={onsettings === undefined}
-			>Settings</Button
+		<Button
+			variant="ghost"
+			onclick={onsettings}
+			disabled={onsettings === undefined}
+			aria-current={settingsOpen ? 'page' : undefined}>Settings</Button
 		>
 		<Button variant="ghost" onclick={lock} busy={locking}>Lock</Button>
 	</nav>

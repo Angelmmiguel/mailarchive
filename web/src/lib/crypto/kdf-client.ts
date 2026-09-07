@@ -29,7 +29,9 @@ export async function deriveRootInWorker(passphrase: string, params: KdfParams):
 			worker.onerror = (event) => {
 				reject(new Error(event.message || 'kdf worker failed'));
 			};
-			const request: KdfRequest = { passphrase, params };
+			// A plain copy: parameters read off reactive state are proxies, which
+			// the structured clone refuses.
+			const request: KdfRequest = { passphrase, params: { ...params } };
 			worker.postMessage(request);
 		});
 	} finally {

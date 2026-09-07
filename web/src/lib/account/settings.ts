@@ -21,5 +21,8 @@ export async function saveSettings(
 	const body: ManifestBody = { ...current.body, settings };
 	const data = encodeManifest({ header: current.header, body }, session.keys.manifest);
 	const { etag } = await call(deps.api.putManifest(data, current.etag));
+	// A lock while the request was out closed the session; the write stands,
+	// but nothing decrypted may be kept here.
+	if (session.status !== 'unlocked') throw new LockedError();
 	session.manifest = { header: current.header, body, etag };
 }

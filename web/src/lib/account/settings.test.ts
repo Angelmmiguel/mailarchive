@@ -50,6 +50,24 @@ describe('saveSettings', () => {
 		expect(api.putManifest).not.toHaveBeenCalled();
 	});
 
+	it('does not store the manifest into a session locked while the write was out', async () => {
+		const account = createTestAccount();
+		session.unlock(Uint8Array.from(account.dek), {
+			header: account.header,
+			body: account.body,
+			etag: '"v1"'
+		});
+		api.putManifest.mockImplementation(async () => {
+			session.lock();
+			return { etag: '"v2"' };
+		});
+
+		await expect(saveSettings({ ownAddresses: ['a@example.com'] }, tinyDeps(api))).rejects.toThrow(
+			LockedError
+		);
+		expect(session.manifest).toBeNull();
+	});
+
 	it('keeps the session manifest when the write fails', async () => {
 		const account = createTestAccount();
 		session.unlock(Uint8Array.from(account.dek), {

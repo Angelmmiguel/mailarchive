@@ -14,6 +14,7 @@
 	import type { ResolvedPathname } from '$app/types';
 	import { checkForSegments, SYNC_INTERVAL } from '$lib/account/sync';
 	import { openArchive } from '$lib/app/boot';
+	import { isLeaving } from '$lib/app/lock';
 	import { archiveSearch } from '$lib/app/navigation';
 	import { count } from '$lib/app/format';
 	import { Button, Code, EmptyState, Strip, ThreadList } from '$lib/components';
@@ -37,7 +38,7 @@
 	let reloading = $state(false);
 
 	$effect(() => {
-		if (unlocked || archive.health === null) return;
+		if (unlocked || archive.health === null || isLeaving()) return;
 		if (!archive.health.setup) void goto(resolve('/setup'), { replaceState: true });
 		else void goto(resolve('/unlock'), { replaceState: true });
 	});

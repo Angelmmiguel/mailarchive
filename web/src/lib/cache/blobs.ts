@@ -18,13 +18,21 @@ export interface BlobCache {
 	put(id: string, bytes: Bytes): Promise<void>;
 	delete(id: string): Promise<void>;
 	clear(): Promise<void>;
+	/** Bytes held, roughly, or null when the store cannot say. */
+	size(): Promise<number | null>;
 }
 
 /** A cache over IndexedDB; one connection, opened on first use. */
 export class IndexedDbCache implements BlobCache {
 	private db: Promise<IDBDatabase | null> | null = null;
 
-	constructor(private readonly factory: () => IDBFactory | undefined) {}
+	constructor(
+		private readonly factory: () => IDBFactory | undefined,
+		private readonly estimate: () => Promise<StorageEstimate | undefined> = () =>
+			typeof navigator === 'undefined' || navigator.storage === undefined
+				? Promise.resolve(undefined)
+				: navigator.storage.estimate()
+	) {}
 
 	async get(id: string): Promise<Bytes | null> {
 		const found = await this.run('readonly', (store) => store.get(id));
@@ -41,6 +49,20 @@ export class IndexedDbCache implements BlobCache {
 
 	async clear(): Promise<void> {
 		await this.run('readwrite', (store) => store.clear());
+	}
+
+	/**
+	 * The origin's storage estimate, which is this cache: summing the
+	 * entries would read every cached blob back just to measure them.
+	 */
+	async size(): Promise<number | null> {
+		if ((await this.open()) === null) return null;
+		try {
+			const usage = (await this.estimate())?.usage;
+			return typeof usage === 'number' ? usage : null;
+		} catch {
+			return null;
+		}
 	}
 
 	private open(): Promise<IDBDatabase | null> {
@@ -113,6 +135,12 @@ export class MemoryCache implements BlobCache {
 	clear(): Promise<void> {
 		this.entries.clear();
 		return Promise.resolve();
+	}
+
+	size(): Promise<number | null> {
+		let total = 0;
+		for (const bytes of this.entries.values()) total += bytes.byteLength;
+		return Promise.resolve(total);
 	}
 }
 
