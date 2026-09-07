@@ -59,6 +59,29 @@ If port 8080 is taken, put `MAILARCHIVE_ADDR=:8090` (any free port) in a
 `.env.local` file at the repo root. The Nix shell loads it, and both the Go
 server and the Vite proxy read the same variable.
 
+## Deployment
+
+The image is `angelrb/mailarchive`, built from the `Dockerfile` with
+`just image`. It runs the binary from scratch as `nobody:users` (99:100) with
+the archive at `/data` and the app on port 8080:
+
+```bash
+mkdir -p data && chown 99:100 data
+docker run -d --name mailarchive -p 8989:8080 -v "$PWD/data:/data" angelrb/mailarchive
+```
+
+The host directory must belong to uid 99, because the archive is written
+0700/0600. Set `MAILARCHIVE_SECURE=true` when the app is served over HTTPS
+by a reverse proxy; it marks the session cookie Secure, so leave it off on
+a plain-HTTP LAN.
+
+**Unraid.** [unraid/mailarchive.xml](unraid/mailarchive.xml) is a Docker
+template with the port, archive path and the variables above. Copy it to
+`/boot/config/plugins/dockerMan/templates-user/` and it appears in the
+template dropdown of *Docker → Add Container*, or add this repository under
+*Apps → Settings → Template Repositories*. Unraid creates the appdata path
+owned by `nobody:users`, which is what the container runs as.
+
 ## Status
 
 Early. The Go server, the SvelteKit scaffolding and their test suites are in

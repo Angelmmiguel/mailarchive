@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>mailarchive</Name>
+  <Repository>angelrb/mailarchive</Repository>
+  <Registry>https://hub.docker.com/r/angelrb/mailarchive/</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Angelmmiguel/mailarchive/issues</Support>
+  <Project>https://github.com/Angelmmiguel/mailarchive</Project>
+  <Overview>Zero-knowledge, self-hosted email archive. Export old mail as .eml files, drop them into the web app and browse them from any device. Everything is parsed, encrypted, indexed and searched in the browser; the server stores ciphertext only. One passphrase plus a recovery key, no server-side reset. The archive is plain files under the data path, so a backup is a copy.</Overview>
+  <Category>Productivity: Backup:</Category>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <Icon>https://raw.githubusercontent.com/Angelmmiguel/mailarchive/main/unraid/mailarchive.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/Angelmmiguel/mailarchive/main/unraid/mailarchive.xml</TemplateURL>
+  <Config Name="Web UI port" Target="8080" Default="8989" Mode="tcp" Description="Host port for the web app and API." Type="Port" Display="always" Required="true" Mask="false">8989</Config>
+  <Config Name="Archive" Target="/data" Default="/mnt/user/appdata/mailarchive" Mode="rw" Description="Where the encrypted archive lives. The container runs as nobody:users (99:100), so this path must be owned by that user; Unraid creates it that way." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/mailarchive</Config>
+  <Config Name="Secure cookie" Target="MAILARCHIVE_SECURE" Default="false|true" Description="Set to true when the app is reached over HTTPS (a reverse proxy such as SWAG or Nginx Proxy Manager). Marks the session cookie Secure; login will fail over plain HTTP while it is on." Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="Login attempts per minute" Target="MAILARCHIVE_LOGIN_ATTEMPTS" Default="10" Description="Login, setup and rekey attempts allowed per address and minute." Type="Variable" Display="advanced" Required="false" Mask="false">10</Config>
+</Container>

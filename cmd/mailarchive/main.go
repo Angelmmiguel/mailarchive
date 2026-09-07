@@ -47,6 +47,7 @@ flags:
   --login-attempts  login, setup and rekey attempts allowed per address and
                     minute (env MAILARCHIVE_LOGIN_ATTEMPTS, default 10)
   --secure          mark the session cookie Secure; use it behind HTTPS
+                    (env MAILARCHIVE_SECURE)
 `)
 }
 
@@ -56,7 +57,7 @@ func serve(args []string) error {
 	addr := fs.String("addr", env("MAILARCHIVE_ADDR", ":8080"), "listen address")
 	dataDir := fs.String("data", env("MAILARCHIVE_DATA", "./data"), "data directory")
 	loginAttempts := fs.Int("login-attempts", envInt("MAILARCHIVE_LOGIN_ATTEMPTS", auth.DefaultLoginAttempts), "login attempts per address and minute")
-	secure := fs.Bool("secure", false, "mark the session cookie Secure")
+	secure := fs.Bool("secure", envBool("MAILARCHIVE_SECURE"), "mark the session cookie Secure")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -138,4 +139,12 @@ func envInt(key string, fallback int) int {
 		return n
 	}
 	return fallback
+}
+
+// envBool is true only for a value strconv.ParseBool accepts as true; unset
+// or malformed means false, so a typo never marks a plain-HTTP cookie Secure
+// and locks the user out.
+func envBool(key string) bool {
+	b, err := strconv.ParseBool(os.Getenv(key))
+	return err == nil && b
 }

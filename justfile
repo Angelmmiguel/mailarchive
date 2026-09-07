@@ -35,6 +35,12 @@ lint: web-check
 build: web-build
     go build -o bin/mailarchive ./cmd/mailarchive
 
+# Build the container image for linux/amd64, the platform Unraid runs. The
+# Dockerfile builds the web app and the binary itself, so nothing here
+# depends on a prior `just build`.
+image version="latest":
+    docker build --platform linux/amd64 -t angelrb/mailarchive:{{version}} -t angelrb/mailarchive:latest .
+
 # Report files that gofmt would change.
 fmt:
     gofmt -l .
