@@ -137,6 +137,14 @@ describe('setup and login', () => {
 		await expect(api.logout()).resolves.toBeUndefined();
 		expect(lastRequest()).toMatchObject({ url: '/api/logout', init: { method: 'POST' } });
 	});
+
+	it('logoutOnUnload sends the logout as a beacon', () => {
+		const sendBeacon = vi.fn(() => true);
+		vi.stubGlobal('navigator', { sendBeacon });
+
+		api.logoutOnUnload();
+		expect(sendBeacon).toHaveBeenCalledWith('/api/logout');
+	});
 });
 
 describe('manifest', () => {

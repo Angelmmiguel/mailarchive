@@ -21,7 +21,7 @@ import { session } from '$lib/state/session.svelte';
 import { fakeStorage } from '$lib/testing/storage';
 import type { Deps } from './deps';
 import { WrongPassphraseError, WrongRecoveryKeyError } from './errors';
-import { recover } from './recover';
+import { openRecovery } from './recover';
 import { changePassphrase, regenerateRecoveryKey } from './rotate';
 import { createAccount } from './setup';
 import { lock, resume, unlock } from './unlock';
@@ -174,10 +174,10 @@ describe('account flows against a live server', () => {
 	it('recover rejects the retired phrase and accepts the current one', async () => {
 		await lock(deps);
 
-		await expect(recover(phrase1, p3, deps)).rejects.toThrow(WrongRecoveryKeyError);
+		await expect(openRecovery(phrase1, deps)).rejects.toThrow(WrongRecoveryKeyError);
 		expect(session.status).toBe('locked');
 
-		({ recoveryPhrase: phrase3 } = await recover(phrase2, p3, deps));
+		({ recoveryPhrase: phrase3 } = await (await openRecovery(phrase2, deps)).finish(p3));
 		expect(phrase3.split(' ')).toHaveLength(24);
 		expect(phrase3).not.toBe(phrase2);
 		expect(session.status).toBe('unlocked');

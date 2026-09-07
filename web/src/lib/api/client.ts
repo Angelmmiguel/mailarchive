@@ -74,6 +74,15 @@ export async function logout(): Promise<void> {
 	if (!res.ok) await fail(res);
 }
 
+/**
+ * `logout` for a page that is going away: a beacon outlives the document,
+ * where a fetch would be cut short. Fire and forget; the server's session
+ * expires on its own if it is lost.
+ */
+export function logoutOnUnload(): void {
+	navigator.sendBeacon('/api/logout');
+}
+
 /** What `rekey` replaces: any subset of the credentials, always with the manifest. */
 export interface Rekey extends Partial<Credentials> {
 	/**

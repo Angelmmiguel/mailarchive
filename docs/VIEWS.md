@@ -55,9 +55,9 @@ location the user was at when the session expired.
 Errors: wrong passphrase, rate limited (with the wait), server unreachable.
 
 ### Recover `/recover`
-Step 1: enter the recovery key. Step 2: set a new passphrase and confirmation.
-Then Recovery key is shown again with a freshly generated key, and the flow
-ends in Archive.
+Three steps on one screen. Step 1: enter the recovery key, which is checked
+with the server. Step 2: set a new passphrase and confirmation. Step 3: the
+freshly generated recovery key, shown once, then Archive.
 
 ## Reading
 
@@ -178,8 +178,11 @@ Things the account layer cannot handle on its own and the screens must.
 - **Not yet built.** The decrypting-index progress after a correct
   passphrase (there is no index to decrypt), the attempts-left count in the
   wrong-passphrase message (the server does not report it; the rate-limited
-  message asks to wait a minute, the default window). Recover is a
-  placeholder that Unlock links to.
+  message asks to wait a minute, the default window).
+- **Recover holds keys between its steps.** The key opens the archive
+  before the passphrase is asked, so the DEK and the login wait in the
+  screen; leaving it, or Start over, zeroes them and logs out, and a tab
+  that closes meanwhile sends the logout as a beacon.
 - **Lock is one function.** `lib/app/lock.ts` drops the keys and goes to
   Unlock with the way back; the toolbar, Settings and an expired import
   use it.

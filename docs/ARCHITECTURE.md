@@ -335,7 +335,9 @@ instant.
   sessionStorage, zero every key.
 - **Recover.** Parse the words, derive the recovery KEK and auth key, log in
   with it, unwrap the DEK under the recovery KEK, then rekey with a new
-  passphrase and a fresh recovery key.
+  passphrase and a fresh recovery key. The DEK and the recovery auth key
+  wait in memory while the passphrase is chosen; giving up zeroes both and
+  logs out (as a beacon when the tab closes).
 - **Rekey** (passphrase change, recovery key change, parameter change). New
   salt or new recovery key, rewrap the DEK, rebuild the manifest header, and
   send the changed credentials and the new manifest in one call under the

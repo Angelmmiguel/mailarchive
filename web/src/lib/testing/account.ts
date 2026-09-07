@@ -28,6 +28,7 @@ export function mockApi(): MockApi {
 		setup: vi.fn<Api['setup']>(),
 		login: vi.fn<Api['login']>(),
 		logout: vi.fn<Api['logout']>(),
+		logoutOnUnload: vi.fn<Api['logoutOnUnload']>(),
 		rekey: vi.fn<Api['rekey']>(),
 		putSessionKey: vi.fn<Api['putSessionKey']>(),
 		getSessionKey: vi.fn<Api['getSessionKey']>(),
