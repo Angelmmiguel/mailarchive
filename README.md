@@ -1,5 +1,7 @@
 # mailarchive
 
+[![CI](https://github.com/Angelmmiguel/mailarchive/actions/workflows/ci.yml/badge.svg)](https://github.com/Angelmmiguel/mailarchive/actions/workflows/ci.yml)
+
 Store old emails securely and clear your inbox.
 
 mailarchive is a self-hosted, zero-knowledge email archive. Export your old
@@ -58,6 +60,12 @@ the Go binary serves both. `just build` writes `bin/mailarchive`.
 If port 8080 is taken, put `MAILARCHIVE_ADDR=:8090` (any free port) in a
 `.env.local` file at the repo root. The Nix shell loads it, and both the Go
 server and the Vite proxy read the same variable.
+
+GitHub Actions runs the same commands on every push and pull request
+([.github/workflows/ci.yml](.github/workflows/ci.yml)): the Go suite with the
+race detector, the web checks and unit tests, and `just web-e2e` for the
+account flows and the Playwright specs. Each job works inside `nix develop`,
+so CI uses the toolchain and the browsers that `flake.lock` pins.
 
 ## Deployment
 
