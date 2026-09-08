@@ -61,13 +61,16 @@ server and the Vite proxy read the same variable.
 
 ## Deployment
 
-The image is `angelrb/mailarchive`, built from the `Dockerfile` with
-`just image`. It runs the binary from scratch as `nobody:users` (99:100) with
-the archive at `/data` and the app on port 8080:
+The image is [`ghcr.io/angelmmiguel/mailarchive`](https://github.com/Angelmmiguel/mailarchive/pkgs/container/mailarchive),
+published by [.github/workflows/image.yml](.github/workflows/image.yml): every
+push to `main` updates `latest`, and a `v*` tag adds the version tags.
+`just image` builds the same image locally. It runs the binary from scratch
+as `nobody:users` (99:100) with the archive at `/data` and the app on port
+8080:
 
 ```bash
 mkdir -p data && chown 99:100 data
-docker run -d --name mailarchive -p 8989:8080 -v "$PWD/data:/data" angelrb/mailarchive
+docker run -d --name mailarchive -p 8989:8080 -v "$PWD/data:/data" ghcr.io/angelmmiguel/mailarchive
 ```
 
 The host directory must belong to uid 99, because the archive is written
