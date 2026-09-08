@@ -55,7 +55,7 @@
 
 	// A new thread starts with its newest message open and the rest folded.
 	const expanded = $derived(new SvelteSet([thread.latest.id]));
-	// Written by the button, reset by the next thread.
+	// Written by the card, reset by the next thread.
 	let images = $derived(thread.id === null);
 	const opened = new SvelteMap<string, Opened>();
 
@@ -89,14 +89,6 @@
 <article class="reader" aria-labelledby="thread-title">
 	<nav class="bar" aria-label="Thread">
 		<a class="back" href={archiveHref}>← Archive</a>
-		<button
-			type="button"
-			class="step images"
-			aria-pressed={images}
-			onclick={() => (images = !images)}
-		>
-			{images ? 'Hide images' : 'Load images'}
-		</button>
 		<span class="place">{position === null ? '–' : position} / {total}</span>
 		{#if prevHref === null}
 			<span class="step" aria-disabled="true">↑ prev</span>
@@ -150,6 +142,7 @@
 							message={opened.get(record.id)?.message ?? null}
 							error={opened.get(record.id)?.error ?? null}
 							{images}
+							onimages={(on) => (images = on)}
 							ondownload={() => ondownload(record)}
 							oninline={() => oninline(record)}
 							onsource={() => onsource(record)}
@@ -195,18 +188,6 @@
 	.back {
 		letter-spacing: var(--mono-tracking-tight);
 		text-transform: uppercase;
-	}
-
-	.images {
-		margin-left: var(--space-2);
-		border: 1px solid transparent;
-		background: transparent;
-		cursor: pointer;
-	}
-
-	.images[aria-pressed='true'] {
-		border-color: var(--border-strong);
-		color: var(--text-body);
 	}
 
 	.back:hover,

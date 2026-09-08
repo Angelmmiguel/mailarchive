@@ -86,9 +86,9 @@ on narrow screens it replaces it.
 The messages of one conversation, oldest first, all collapsed except the
 latest. The key is an HMAC of the thread id under the id key, so the address
 a hard reload sends the server names nothing, and every device derives the
-same one. An expanded message shows from, to, cc, date, subject, the body
-(text or sanitized HTML, with a toggle) and its attachments as chips.
-Per message: download attachment, download the original `.eml`, view source.
+same one. An expanded message shows a bar that chooses the view (text,
+sanitized HTML or source), toggles images and downloads the original
+`.eml`, then from, to, cc, date, the body and its attachments as chips.
 Per thread: previous and next thread in the current list, back to Archive.
 Attachment chips open the file in a new tab for images and PDFs, otherwise
 download it.
@@ -161,10 +161,10 @@ Things the account layer cannot handle on its own and the screens must.
   goes through DOMPurify (`lib/mail/sanitize.ts`) into a shadow root, so
   the message's styles stay in and the page's stay out; scripts, forms,
   embedded documents and image sources are removed, links open in a new
-  tab without a referrer. "Load images" in the reader's bar shows them for
+  tab without a referrer. "Images" in a message's bar shows them for
   the thread being read only: remote ones from their source, `cid:` parts
-  from the raw blob as object URLs; the next thread starts with them off. Text is the default; the toggle shows HTML when
-  the message has it. The original `.eml`, its source and its attachments
+  from the raw blob as object URLs; the next thread starts with them off.
+  HTML is the view a message opens in when it has HTML, text otherwise. The original `.eml`, its source and its attachments
   come from the raw blob, decrypted and, for attachments, parsed again in
   the browser; images, PDFs and plain text open in a tab, the rest download.
 - **Segments from another device.** The Archive layout checks the manifest

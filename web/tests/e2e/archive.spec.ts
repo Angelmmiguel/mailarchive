@@ -80,22 +80,24 @@ test('opening a thread shows its messages with only the newest open', async () =
 	const message = reader().getByTestId('message');
 	await expect(message).toContainText('Wallbox <no-reply@wallbox.example.test>');
 	await expect(message).toContainText('reader@example.org');
-	await expect(message.getByTestId('text-body')).toContainText(
-		'Your charging summary report for August is attached.'
-	);
-
-	await message.getByRole('button', { name: 'HTML' }).click();
-	await expect(message.getByTestId('text-body')).toBeHidden();
+	// HTML is the view a message with HTML opens in.
 	await expect(message.getByTestId('html-body').locator('p').nth(2)).toHaveText(
 		'Total energy: 184 kWh over 12 sessions.'
 	);
 	// The inline logo lost its source: nothing is fetched to render mail.
 	await expect(message.getByTestId('html-body').locator('img[src]')).toHaveCount(0);
 
+	await message.getByRole('button', { name: 'Text' }).click();
+	await expect(message.getByTestId('html-body')).toBeHidden();
+	await expect(message.getByTestId('text-body')).toContainText(
+		'Your charging summary report for August is attached.'
+	);
+	await message.getByRole('button', { name: 'HTML' }).click();
+
 	// Until asked: then the embedded logo comes from the raw blob.
-	await reader().getByRole('button', { name: 'Load images' }).click();
+	await message.getByRole('button', { name: 'Images' }).click();
 	await expect(message.getByTestId('html-body').locator('img[src^="blob:"]')).toHaveCount(1);
-	await expect(reader().getByRole('button', { name: 'Hide images' })).toHaveAttribute(
+	await expect(message.getByRole('button', { name: 'Images' })).toHaveAttribute(
 		'aria-pressed',
 		'true'
 	);
@@ -129,18 +131,17 @@ test('an attachment, the original and the source come from the raw blob', async 
 
 	await message.getByRole('button', { name: 'Source' }).click();
 	await expect(message.getByTestId('source')).toContainText('Message-ID: <HWnqaDLqScir3bd-3iy5ag@');
-	await message.getByRole('button', { name: 'Source' }).click();
+	await message.getByRole('button', { name: 'HTML' }).click();
 	await expect(message.getByTestId('source')).toBeHidden();
 });
 
 test('prev, next and the arrow keys move through the listing', async () => {
 	await expect(reader().getByText('↓ next')).toHaveAttribute('aria-disabled', 'true');
 	await reader().getByRole('link', { name: '↑ prev' }).click();
-	await expect(reader().getByRole('heading', { name: /Tablón de Gómez Project/ })).toBeVisible();
-	await expect(reader().getByRole('button', { name: 'Load images' })).toHaveAttribute(
-		'aria-pressed',
-		'false'
-	);
+	await expect(reader().getByRole('heading', { name: 'Tablón de Gómez Project 🇨🇴' })).toBeVisible();
+	await expect(
+		reader().getByTestId('message').getByRole('button', { name: 'Images' })
+	).toHaveAttribute('aria-pressed', 'false');
 	await expect(reader().getByText('1 / 2')).toBeVisible();
 	await expect(reader().getByText('↑ prev')).toHaveAttribute('aria-disabled', 'true');
 
@@ -178,7 +179,7 @@ test('filters narrow the list, travel in the URL and survive a reload', async ()
 
 test('a thread address survives a reload and an unknown one is reported', async () => {
 	await page.reload();
-	await expect(reader().getByRole('heading', { name: /Tablón de Gómez Project/ })).toBeVisible();
+	await expect(reader().getByRole('heading', { name: 'Tablón de Gómez Project 🇨🇴' })).toBeVisible();
 
 	await page.goto(`/t/${'0'.repeat(64)}`);
 	await expect(page.getByRole('heading', { name: 'Thread not found' })).toBeVisible();
@@ -195,7 +196,7 @@ test('a narrow screen shows the list or the thread, not both', async () => {
 	await expect(page.getByText('Select a thread to read it.')).toBeHidden();
 
 	await rows().nth(0).click();
-	await expect(reader().getByRole('heading', { name: /Tablón de Gómez Project/ })).toBeVisible();
+	await expect(reader().getByRole('heading', { name: 'Tablón de Gómez Project 🇨🇴' })).toBeVisible();
 	await expect(list()).toBeHidden();
 
 	await reader().getByRole('link', { name: '← Archive' }).click();

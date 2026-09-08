@@ -1,9 +1,11 @@
 <!--
-  One message opened in a thread: the headers, the body as text or as
-  sanitized HTML, the original to download or read as source, and the
-  attachments as chips. Fetching is the screen's; this owns the toggles
-  and the working states. Images show only while the thread asks for them:
-  remote ones straight from their source, embedded ones from the raw blob.
+  One message opened in a thread: the headers under a bar that chooses the
+  view, the original to download, and the attachments as chips. Fetching is
+  the screen's; this owns the choice and the working states. HTML is the
+  view when the message has it. Images show only while the thread asks for
+  them: remote ones straight from their source, embedded ones from the raw
+  blob. A decryption slow enough to notice shows a spinner; a fast one
+  shows nothing before the view arrives.
 -->
 <script lang="ts">
 	import { SvelteMap } from 'svelte/reactivity';
@@ -18,6 +20,8 @@
 	import HtmlBody from './HtmlBody.svelte';
 	import Notice from './Notice.svelte';
 
+	type Mode = 'text' | 'html' | 'source';
+
 	interface Props {
 		record: IndexRecord;
 		/** Null while the view is being fetched. */
@@ -25,6 +29,8 @@
 		error: string | null;
 		/** Whether images may load right now. */
 		images?: boolean;
+		/** Asks the thread to load images, or to stop. */
+		onimages?: (on: boolean) => void;
 		ondownload: () => Promise<void>;
 		/** The parts the HTML embeds by content id. */
 		oninline: () => Promise<Map<string, AttachmentFile>>;
@@ -37,14 +43,17 @@
 		message,
 		error,
 		images = false,
+		onimages,
 		ondownload,
 		oninline,
 		onsource,
 		onattachment
 	}: Props = $props();
 
-	// Asking for images is asking to see the HTML; the toggle still works.
-	let mode = $derived<'text' | 'html'>(images && message?.html ? 'html' : 'text');
+	// The view the message arrives in, until the bar is asked for another.
+	// The bar shows no choice before that: which views there are is not
+	// known until the message is here, and a guess would flicker.
+	let mode = $derived<Mode>(message?.html ? 'html' : 'text');
 	// Object URLs for the embedded parts, made when images are first asked
 	// for and revoked with the card.
 	let inline = $state<SvelteMap<string, string> | null>(null);
@@ -78,7 +87,6 @@
 		};
 	});
 	let source = $state<string | null>(null);
-	let showSource = $state(false);
 	let working = $state<string | null>(null);
 	let problem = $state<string | null>(null);
 
@@ -105,82 +113,97 @@
 		}
 	}
 
-	function toggleSource(): void {
-		if (showSource) {
-			showSource = false;
-			return;
-		}
-		if (source !== null) {
-			showSource = true;
+	function select(next: Mode): void {
+		if (next !== 'source' || source !== null) {
+			mode = next;
 			return;
 		}
 		void run('source', async () => {
 			source = await onsource();
-			showSource = true;
+			mode = 'source';
 		});
 	}
 </script>
 
 <article class="message" data-testid="message">
-	<div class="head">
-		<dl class="headers">
-			<dt>From</dt>
-			<dd>{record.from === null ? 'unknown' : mailbox(record.from)}</dd>
-			{#if record.to.length > 0}
-				<dt>To</dt>
-				<dd>{record.to.map(mailbox).join(', ')}</dd>
-			{/if}
-			{#if record.cc.length > 0}
-				<dt>Cc</dt>
-				<dd>{record.cc.map(mailbox).join(', ')}</dd>
-			{/if}
-			<dt>Date</dt>
-			<dd>{longDate(record.date)}</dd>
-		</dl>
-		<div class="tools">
-			{#if html !== null}
-				<div class="modes" role="group" aria-label="Body format">
-					<button type="button" class:on={mode === 'text'} onclick={() => (mode = 'text')}
-						>Text</button
+	{#if message !== null || error !== null}
+		<div class="head">
+			<div class="bar">
+				<span class="legend">View</span>
+				{#if message !== null}
+					<div class="modes" role="group" aria-label="Body format">
+						<button type="button" class:on={mode === 'text'} onclick={() => select('text')}
+							>Text</button
+						>
+						{#if html !== null}
+							<button type="button" class:on={mode === 'html'} onclick={() => select('html')}
+								>HTML</button
+							>
+						{/if}
+						<button
+							type="button"
+							class:on={mode === 'source'}
+							aria-busy={working === 'source'}
+							onclick={() => select('source')}>Source</button
+						>
+					</div>
+				{/if}
+				{#if html !== null && onimages !== undefined}
+					<i class="divider"></i>
+					<button
+						type="button"
+						class="images"
+						aria-pressed={images}
+						onclick={() => onimages(!images)}
 					>
-					<button type="button" class:on={mode === 'html'} onclick={() => (mode = 'html')}
-						>HTML</button
+						<span class="track"><i class="knob"></i></span>Images
+					</button>
+				{/if}
+				<div class="download">
+					<Button
+						variant="ghost"
+						size="sm"
+						busy={working === 'download'}
+						onclick={() => run('download', ondownload)}>↓ .eml</Button
 					>
 				</div>
-			{/if}
-			<div class="actions">
-				<Button
-					variant="ghost"
-					size="sm"
-					busy={working === 'download'}
-					onclick={() => run('download', ondownload)}>↓ .eml</Button
-				>
-				<Button
-					variant="ghost"
-					size="sm"
-					busy={working === 'source'}
-					aria-pressed={showSource}
-					onclick={toggleSource}>Source</Button
-				>
 			</div>
+			<dl class="headers">
+				<dt>From</dt>
+				<dd>{record.from === null ? 'unknown' : mailbox(record.from)}</dd>
+				{#if record.to.length > 0}
+					<dt>To</dt>
+					<dd>{record.to.map(mailbox).join(', ')}</dd>
+				{/if}
+				{#if record.cc.length > 0}
+					<dt>Cc</dt>
+					<dd>{record.cc.map(mailbox).join(', ')}</dd>
+				{/if}
+				<dt>Date</dt>
+				<dd>{longDate(record.date)}</dd>
+			</dl>
 		</div>
-	</div>
+	{/if}
 
 	{#if problem !== null}
 		<Notice>{problem}</Notice>
 	{/if}
 
-	{#if showSource && source !== null}
-		<pre class="source" data-testid="source">{source}</pre>
-	{:else if error !== null}
-		<Notice>{error}</Notice>
-	{:else if message === null}
-		<p class="loading">Decrypting…</p>
-	{:else if mode === 'html' && html !== null}
-		<HtmlBody {html} />
-	{:else}
-		<div class="text" data-testid="text-body">{message.text}</div>
-	{/if}
+	<div class="body" class:ready={message !== null || error !== null}>
+		{#if mode === 'source' && source !== null}
+			<pre class="source" data-testid="source">{source}</pre>
+		{:else if error !== null}
+			<Notice>{error}</Notice>
+		{:else if message === null}
+			<p class="loading" role="status" aria-label="Decrypting">
+				<span class="spinner" aria-hidden="true"></span>
+			</p>
+		{:else if mode === 'html' && html !== null}
+			<HtmlBody {html} />
+		{:else}
+			<div class="text" data-testid="text-body">{message.text}</div>
+		{/if}
+	</div>
 
 	{#if files.length > 0}
 		<div class="files">
@@ -204,20 +227,131 @@
 	}
 
 	.head {
+		animation: enter 200ms ease both;
 		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: var(--space-4);
+		flex-direction: column;
+		border: var(--hairline);
+		border-radius: var(--radius-sm);
+	}
+
+	.bar {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
 		flex-wrap: wrap;
+		min-height: 34px;
+		padding: 0 6px 0 var(--space-3);
+		border-bottom: var(--hairline);
+		background: var(--surface-panel);
+	}
+
+	.legend {
+		font: var(--mono-sm) / 1 var(--font-mono);
+		letter-spacing: var(--mono-tracking);
+		text-transform: uppercase;
+		color: var(--text-faint);
+	}
+
+	.modes {
+		display: inline-flex;
+		border: 1px solid var(--border-strong);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+	}
+
+	.modes button {
+		height: 24px;
+		padding: 0 10px;
+		border: 0;
+		border-left: 1px solid var(--border-strong);
+		background: transparent;
+		color: var(--text-muted);
+		font: 500 var(--mono-sm) / 1 var(--font-mono);
+		letter-spacing: var(--mono-tracking-tight);
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+
+	.modes button:first-child {
+		border-left: 0;
+	}
+
+	.modes button:hover {
+		background: var(--surface-inset);
+	}
+
+	.modes .on {
+		background: var(--surface-ink);
+		color: var(--text-on-ink);
+	}
+
+	.divider {
+		width: 1px;
+		height: 16px;
+		background: var(--border-strong);
+	}
+
+	.images {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		height: var(--control-h-sm);
+		padding: 0 var(--space-1);
+		border: 0;
+		background: transparent;
+		color: var(--text-muted);
+		font: 500 var(--mono-sm) / 1 var(--font-mono);
+		letter-spacing: var(--mono-tracking-tight);
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+
+	.images:hover {
+		color: var(--text-body);
+	}
+
+	.track {
+		position: relative;
+		flex: none;
+		width: 22px;
+		height: 12px;
+		border-radius: 6px;
+		background: var(--border-strong);
+		transition: background 150ms;
+	}
+
+	.knob {
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--surface-page);
+		transition: left 150ms;
+	}
+
+	.images[aria-pressed='true'] .track {
+		background: var(--accent);
+	}
+
+	.images[aria-pressed='true'] .knob {
+		left: 12px;
+	}
+
+	.download {
+		margin-left: auto;
+		flex: none;
 	}
 
 	.headers {
 		display: grid;
 		grid-template-columns: 48px minmax(0, 1fr);
-		gap: 4px 12px;
+		gap: 2px var(--space-3);
 		align-items: baseline;
 		margin: 0;
 		min-width: 0;
+		padding: var(--space-2) var(--space-3);
 	}
 
 	dt {
@@ -233,46 +367,47 @@
 		overflow-wrap: anywhere;
 	}
 
-	.tools {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: var(--space-2);
-	}
-
-	.modes {
-		display: inline-flex;
-		border: 1px solid var(--border-strong);
-		border-radius: var(--radius-sm);
-		overflow: hidden;
-	}
-
-	.modes button {
-		height: 24px;
-		padding: 0 10px;
-		border: 0;
-		background: transparent;
-		color: var(--text-muted);
-		font: 500 var(--mono-sm) / 1 var(--font-mono);
-		letter-spacing: var(--mono-tracking-tight);
-		text-transform: uppercase;
-		cursor: pointer;
-	}
-
-	.modes .on {
-		background: var(--surface-ink);
-		color: var(--text-on-ink);
-	}
-
-	.actions {
-		display: flex;
-		gap: var(--space-1);
+	.body.ready {
+		animation: enter 200ms ease both;
 	}
 
 	.loading {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88px;
 		margin: 0;
-		font: var(--body-md) var(--font-body);
-		color: var(--text-muted);
+		/* A view that is already in hand should show no waiting at all. */
+		opacity: 0;
+		animation: appear 150ms ease 300ms forwards;
+	}
+
+	.spinner {
+		width: 16px;
+		height: 16px;
+		border: 2px solid var(--text-faint);
+		border-right-color: transparent;
+		border-radius: 50%;
+		animation: spin 700ms linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	@keyframes appear {
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes enter {
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
 	}
 
 	.text {
@@ -299,5 +434,16 @@
 		display: flex;
 		gap: var(--space-2);
 		flex-wrap: wrap;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.head,
+		.body.ready {
+			animation: none;
+		}
+
+		.spinner {
+			animation-duration: 2s;
+		}
 	}
 </style>
