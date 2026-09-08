@@ -119,3 +119,17 @@ describe('openOriginal and openAttachment', () => {
 		).rejects.toThrow(MessageFormatError);
 	});
 });
+
+describe('openMessage across a lock', () => {
+	it('keeps nothing opened during a lock', async () => {
+		const { view } = await stored('report.eml');
+		const original = api.getBlob.getMockImplementation()!;
+		api.getBlob.mockImplementation((wanted) => {
+			const result = original(wanted);
+			session.lock();
+			return result;
+		});
+
+		await expect(openMessage({ view }, { api })).rejects.toThrow(LockedError);
+	});
+});

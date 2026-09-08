@@ -7,6 +7,7 @@ export type ServerErrorCode =
 	| 'unauthorized'
 	| 'wrong_credential'
 	| 'forbidden'
+	| 'header_locked'
 	| 'not_found'
 	| 'not_setup'
 	| 'already_setup'

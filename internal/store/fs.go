@@ -23,10 +23,12 @@ const dirPerm fs.FileMode = 0o700
 //	blobs/<id[:2]>/<id>   one file per blob
 //	manifest              the current manifest
 //	tmp/                  in-progress writes, same filesystem as the targets
+//	lock                  held by the serving process, see NewFS
 //
-// so a backup is a plain recursive copy.
+// so a backup is a plain recursive copy, taken while the server is idle.
 type FS struct {
 	root string
+	lock io.Closer
 
 	// manifestMu makes the read-compare-write of PutManifest atomic. The
 	// manifest is the only mutable object in the store.
@@ -38,6 +40,11 @@ var _ Store = (*FS)(nil)
 // NewFS prepares root and returns a Store rooted at it. Directories are created
 // with 0700 and files with 0600: the archive is single-user and the data dir
 // may sit on a shared NAS volume.
+//
+// The directory is locked for the life of the store, on the platforms that
+// support flock(2): a second process opening it fails with ErrLocked rather
+// than sweeping this one's temp files and racing its manifest writes. Close
+// releases the lock.
 func NewFS(root string) (*FS, error) {
 	s := &FS{root: root}
 	for _, dir := range []string{root, filepath.Join(root, "blobs"), s.tmpDir()} {
@@ -45,27 +52,41 @@ func NewFS(root string) (*FS, error) {
 			return nil, fmt.Errorf("store: create %s: %w", dir, err)
 		}
 	}
+	lock, err := lockDir(root)
+	if err != nil {
+		return nil, err
+	}
+	s.lock = lock
 	// Temp files only ever survive a crash mid-write; they are never linked to
 	// by anything, so dropping them at startup is safe.
 	entries, err := os.ReadDir(s.tmpDir())
 	if err != nil {
+		_ = lock.Close()
 		return nil, fmt.Errorf("store: read temp dir: %w", err)
 	}
 	for _, e := range entries {
 		if err := os.RemoveAll(filepath.Join(s.tmpDir(), e.Name())); err != nil {
+			_ = lock.Close()
 			return nil, fmt.Errorf("store: clean temp dir: %w", err)
 		}
 	}
 	return s, nil
 }
 
+// Close releases the data directory. The store must not be used afterwards.
+func (s *FS) Close() error {
+	return s.lock.Close()
+}
+
 func (s *FS) tmpDir() string       { return filepath.Join(s.root, "tmp") }
+func (s *FS) blobsDir() string     { return filepath.Join(s.root, "blobs") }
 func (s *FS) manifestPath() string { return filepath.Join(s.root, "manifest") }
+func lockPath(root string) string  { return filepath.Join(root, "lock") }
 
 // blobPath returns the on-disk path of id. It must only be called with an id
 // that ValidID accepted.
 func (s *FS) blobPath(id string) string {
-	return filepath.Join(s.root, "blobs", id[:2], id)
+	return filepath.Join(s.blobsDir(), id[:2], id)
 }
 
 // Get implements Store.
@@ -99,8 +120,8 @@ func (s *FS) Put(ctx context.Context, id string, r io.Reader) error {
 	if _, err := os.Stat(final); err == nil {
 		return ErrExists
 	}
-	if err := os.MkdirAll(filepath.Dir(final), dirPerm); err != nil {
-		return fmt.Errorf("store: create shard dir: %w", err)
+	if err := s.ensureShard(filepath.Dir(final)); err != nil {
+		return err
 	}
 	tmp, err := s.writeTemp(ctx, r)
 	if err != nil {
@@ -118,6 +139,20 @@ func (s *FS) Put(ctx context.Context, id string, r io.Reader) error {
 		return fmt.Errorf("store: link blob: %w", err)
 	}
 	return syncDir(filepath.Dir(final))
+}
+
+// ensureShard creates a shard directory the first time a blob lands in it,
+// and syncs blobs/ so that the new entry survives a power loss together
+// with the blob it is about to hold. Two Puts creating the same shard at
+// once both succeed.
+func (s *FS) ensureShard(dir string) error {
+	if _, err := os.Stat(dir); err == nil {
+		return nil
+	}
+	if err := os.Mkdir(dir, dirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("store: create shard dir: %w", err)
+	}
+	return syncDir(s.blobsDir())
 }
 
 // Exists implements Store.
@@ -138,8 +173,7 @@ func (s *FS) Exists(_ context.Context, id string) (bool, error) {
 
 // List implements Store.
 func (s *FS) List(ctx context.Context, fn func(id string) error) error {
-	blobs := filepath.Join(s.root, "blobs")
-	shards, err := os.ReadDir(blobs)
+	shards, err := os.ReadDir(s.blobsDir())
 	if err != nil {
 		return fmt.Errorf("store: read blobs dir: %w", err)
 	}
@@ -147,7 +181,7 @@ func (s *FS) List(ctx context.Context, fn func(id string) error) error {
 		if !shard.IsDir() {
 			continue
 		}
-		entries, err := os.ReadDir(filepath.Join(blobs, shard.Name()))
+		entries, err := os.ReadDir(filepath.Join(s.blobsDir(), shard.Name()))
 		if err != nil {
 			return fmt.Errorf("store: read shard %s: %w", shard.Name(), err)
 		}
@@ -179,7 +213,7 @@ func (s *FS) Manifest(_ context.Context) ([]byte, string, error) {
 		}
 		return nil, "", fmt.Errorf("store: read manifest: %w", err)
 	}
-	return data, etag(data), nil
+	return data, ETag(data), nil
 }
 
 // PutManifest implements Store.
@@ -193,7 +227,7 @@ func (s *FS) PutManifest(ctx context.Context, data []byte, ifMatch string) (stri
 		if ifMatch == "" {
 			return "", ErrIfMatchRequired
 		}
-		if ifMatch != etag(current) {
+		if ifMatch != ETag(current) {
 			return "", ErrManifestConflict
 		}
 	case errors.Is(err, fs.ErrNotExist):
@@ -218,7 +252,7 @@ func (s *FS) PutManifest(ctx context.Context, data []byte, ifMatch string) (stri
 	if err := syncDir(s.root); err != nil {
 		return "", err
 	}
-	return etag(data), nil
+	return ETag(data), nil
 }
 
 // writeTemp streams r into a fresh file in tmp/ and returns its path. The file
@@ -262,8 +296,10 @@ func syncDir(path string) error {
 	return nil
 }
 
-// etag returns the HTTP entity tag of data: the quoted hex SHA-256 of the bytes.
-func etag(data []byte) string {
+// ETag returns the HTTP entity tag of a manifest: the quoted hex SHA-256 of
+// its bytes. It is what Manifest and PutManifest report, exposed so a caller
+// can know the tag a manifest will have before it is stored.
+func ETag(data []byte) string {
 	sum := sha256.Sum256(data)
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }

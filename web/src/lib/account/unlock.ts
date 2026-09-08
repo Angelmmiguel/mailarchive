@@ -19,6 +19,9 @@ import { terms } from '$lib/state/terms.svelte';
 import { defaultDeps, type Api, type Deps } from './deps';
 import { call, callAs, MissingManifestError, WrongPassphraseError } from './errors';
 
+/** The channel a lock is announced on, so that the other tabs follow. */
+export const LOCK_CHANNEL = 'mailarchive.lock';
+
 /**
  * Derives the keys, logs in and opens the manifest. A wrong passphrase is
  * rejected at login, before the manifest is ever fetched.
@@ -66,9 +69,10 @@ export async function resume(
 }
 
 /**
- * Zeroes the keys, forgets the sealed DEK and revokes the session. Local
- * state goes first so that locking never waits on the network; a logout that
- * fails changes nothing here, and the server's session expires on its own.
+ * Zeroes the keys, forgets the sealed DEK, tells the other tabs and revokes
+ * the session. Local state goes first so that locking never waits on the
+ * network; a logout that fails changes nothing here, and the server's
+ * session expires on its own.
  */
 export async function lock(deps: Deps = defaultDeps): Promise<void> {
 	session.lock();
@@ -80,6 +84,11 @@ export async function lock(deps: Deps = defaultDeps): Promise<void> {
 	onboarding.takeRecoveryPhrase();
 	forgetMessages();
 	clearPersistedDek();
+	if (typeof BroadcastChannel !== 'undefined') {
+		const channel = new BroadcastChannel(LOCK_CHANNEL);
+		channel.postMessage('locked');
+		channel.close();
+	}
 	try {
 		await deps.api.logout();
 	} catch {

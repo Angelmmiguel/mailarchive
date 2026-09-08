@@ -1,7 +1,7 @@
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
-import { NONCE_LENGTH, open, OVERHEAD, seal, SealError, VERSION } from './aead';
+import { NONCE_LENGTH, open, OVERHEAD, seal, SealError, VERSION, ZeroKeyError } from './aead';
 
 const key = new Uint8Array(32).map((_, i) => i);
 const plaintext = new TextEncoder().encode('hello, archive');
@@ -120,5 +120,11 @@ describe('seal and open', () => {
 		sealed[sealed.length - 1] ^= 0x01;
 
 		expect(() => open(key, sealed, 'test/v1')).toThrow('cannot open sealed data: auth');
+	});
+});
+
+describe('seal with a zeroed key', () => {
+	it('refuses, so that nothing in flight seals under a locked session', () => {
+		expect(() => seal(new Uint8Array(32), new Uint8Array([1]), 'x')).toThrow(ZeroKeyError);
 	});
 });

@@ -90,8 +90,16 @@ async function openBlob(id: string, deps: Pick<Deps, 'api'>): Promise<Bytes> {
 	const keys = session.keys;
 	if (session.status !== 'unlocked' || keys === null) throw new LockedError();
 	const sealed = await call(deps.api.getBlob(id));
+	// A lock during either wait zeroed `keys` and forgot the messages:
+	// nothing opened here may outlive it.
+	const live = (): void => {
+		if (session.keys !== keys) throw new LockedError();
+	};
+	live();
 	if (sealed === null) throw new MissingBlobError(id);
-	return decompress(decryptBlob(keys, id, sealed));
+	const plaintext = await decompress(decryptBlob(keys, id, sealed));
+	live();
+	return plaintext;
 }
 
 function decodeView(plaintext: Bytes): MessageView {

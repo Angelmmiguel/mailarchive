@@ -12,9 +12,10 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import type { ResolvedPathname } from '$app/types';
+	import { SessionExpiredError } from '$lib/account/errors';
 	import { checkForSegments, SYNC_INTERVAL } from '$lib/account/sync';
 	import { openArchive } from '$lib/app/boot';
-	import { isLeaving } from '$lib/app/lock';
+	import { isLeaving, leave } from '$lib/app/lock';
 	import { archiveSearch } from '$lib/app/navigation';
 	import { count } from '$lib/app/format';
 	import { Button, Code, EmptyState, Strip, ThreadList } from '$lib/components';
@@ -81,7 +82,13 @@
 	$effect(() => {
 		if (!unlocked) return;
 		const check = (): void => {
-			if (document.visibilityState === 'visible') void checkForSegments().catch(() => {});
+			if (document.visibilityState !== 'visible') return;
+			void checkForSegments().catch((e: unknown) => {
+				// The server no longer holds the session: the keys here go too,
+				// rather than wait for the next request to be refused.
+				if (e instanceof SessionExpiredError)
+					void leave(page.url.pathname + page.url.search, 'expired');
+			});
 		};
 		const timer = setInterval(check, SYNC_INTERVAL);
 		document.addEventListener('visibilitychange', check);

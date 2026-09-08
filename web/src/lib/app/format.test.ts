@@ -47,6 +47,7 @@ describe('files', () => {
 		expect(opensInTab('text/plain')).toBe(true);
 		expect(opensInTab('application/vnd.ms-excel')).toBe(false);
 		expect(opensInTab('text/html')).toBe(false);
+		expect(opensInTab('image/svg+xml')).toBe(false);
 	});
 });
 

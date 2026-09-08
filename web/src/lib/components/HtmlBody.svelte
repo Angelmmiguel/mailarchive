@@ -1,6 +1,7 @@
 <!--
   A message's HTML, already sanitized, rendered inside a shadow root so
-  that its styles stay in and the page's stay out. No script can run
+  that its styles stay in and the page's stay out, and painted within its
+  own box, so that nothing in it can pose as part of the app. No script can run
   there: the sanitizer removed them and the policy forbids inline ones.
 -->
 <script lang="ts">
@@ -29,5 +30,8 @@
 	.body {
 		max-width: 100%;
 		overflow-x: auto;
+		/* A fixed or absolutely positioned box in the message stays within
+		   the message, and cannot draw over the app around it. */
+		contain: paint;
 	}
 </style>

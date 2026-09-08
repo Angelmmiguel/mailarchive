@@ -206,7 +206,7 @@ func TestSetupRejectsBadKDF(t *testing.T) {
 	}
 }
 
-func TestRotate(t *testing.T) {
+func TestStageAndCommit(t *testing.T) {
 	newKDF := `{"name":"argon2id","m":262144,"t":4,"p":2,"salt":"BBBB"}`
 	for name, tc := range map[string]struct {
 		authKey, recoveryKey []byte
@@ -223,8 +223,22 @@ func TestRotate(t *testing.T) {
 			if tc.kdf != "" {
 				kdf = json.RawMessage(tc.kdf)
 			}
-			if err := c.Rotate(tc.authKey, tc.recoveryKey, kdf); err != nil {
-				t.Fatalf("Rotate: %v", err)
+			r, err := c.Stage(tc.authKey, tc.recoveryKey, kdf, `"new"`)
+			if err != nil {
+				t.Fatalf("Stage: %v", err)
+			}
+			// Staged is not in force: the old keys still verify, the new do not.
+			if !c.Verify(testKey(1)) || !c.Verify(testKey(2)) || c.Verify(testKey(11)) || c.Verify(testKey(12)) {
+				t.Fatal("Stage changed the credentials in force")
+			}
+			if _, err := os.Stat(path + ".next"); err != nil {
+				t.Fatalf("no journal after Stage: %v", err)
+			}
+			if err := r.Commit(); err != nil {
+				t.Fatalf("Commit: %v", err)
+			}
+			if _, err := os.Stat(path + ".next"); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("journal after Commit: %v", err)
 			}
 
 			wantAuth, wantRecovery, wantKDF := testKey(1), testKey(2), compactTestKDF
@@ -256,7 +270,7 @@ func TestRotate(t *testing.T) {
 				}
 			}
 			if perm := mode(t, path); perm != 0o600 {
-				t.Errorf("credentials mode after Rotate = %o, want 600", perm)
+				t.Errorf("credentials mode after Commit = %o, want 600", perm)
 			}
 		})
 	}
@@ -271,45 +285,139 @@ func mode(t *testing.T, path string) os.FileMode {
 	return info.Mode().Perm()
 }
 
-func TestRotateErrors(t *testing.T) {
+func TestDiscard(t *testing.T) {
+	c, path := setupCredentials(t)
+	r, err := c.Stage(testKey(11), testKey(12), nil, `"new"`)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if err := r.Discard(); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if _, err := os.Stat(path + ".next"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("journal after Discard: %v", err)
+	}
+	if !c.Verify(testKey(1)) || !c.Verify(testKey(2)) || c.Verify(testKey(11)) {
+		t.Error("Discard changed the credentials in force")
+	}
+	if installed, err := c.RecoverRotation(`"new"`); err != nil || installed {
+		t.Errorf("RecoverRotation after Discard = %v, %v; want false, nil", installed, err)
+	}
+}
+
+// A crash between the manifest write and Commit leaves the journal next to
+// the new manifest: the next start installs the staged credentials. A crash
+// before the manifest write leaves it next to the old one: the journal goes.
+func TestRecoverRotation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		manifestETag string
+		installed    bool
+	}{
+		"manifest replaced":  {manifestETag: `"new"`, installed: true},
+		"manifest unchanged": {manifestETag: `"old"`, installed: false},
+		"manifest gone":      {manifestETag: "", installed: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, path := setupCredentials(t)
+			if _, err := c.Stage(testKey(11), nil, nil, `"new"`); err != nil {
+				t.Fatalf("Stage: %v", err)
+			}
+			// The process restarts: only the files survive.
+			c, err := LoadCredentials(path)
+			if err != nil {
+				t.Fatalf("LoadCredentials: %v", err)
+			}
+			installed, err := c.RecoverRotation(tc.manifestETag)
+			if err != nil {
+				t.Fatalf("RecoverRotation: %v", err)
+			}
+			if installed != tc.installed {
+				t.Fatalf("installed = %v, want %v", installed, tc.installed)
+			}
+			if _, err := os.Stat(path + ".next"); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("journal after RecoverRotation: %v", err)
+			}
+			reloaded, err := LoadCredentials(path)
+			if err != nil {
+				t.Fatalf("LoadCredentials: %v", err)
+			}
+			for who, creds := range map[string]*Credentials{"in memory": c, "reloaded": reloaded} {
+				if creds.Verify(testKey(11)) != tc.installed || creds.Verify(testKey(1)) == tc.installed {
+					t.Errorf("%s: staged key verifies = %v, want %v", who, creds.Verify(testKey(11)), tc.installed)
+				}
+				if !creds.Verify(testKey(2)) {
+					t.Errorf("%s: the untouched recovery key no longer verifies", who)
+				}
+			}
+			// A second start finds nothing to do.
+			if installed, err := c.RecoverRotation(tc.manifestETag); err != nil || installed {
+				t.Errorf("second RecoverRotation = %v, %v; want false, nil", installed, err)
+			}
+		})
+	}
+}
+
+func TestRecoverRotationRejectsBadJournal(t *testing.T) {
+	c, path := setupCredentials(t)
+	for name, journal := range map[string]string{
+		"not json":    "nonsense",
+		"bad version": `{"version":9,"manifest_etag":"x","credentials":{}}`,
+		"bad hash":    `{"version":1,"manifest_etag":"\"m\"","credentials":{"version":2,"auth_key_hash":"zz","recovery_auth_key_hash":"zz","kdf":{}}}`,
+	} {
+		if err := os.WriteFile(path+".next", []byte(journal), 0o600); err != nil {
+			t.Fatalf("write journal: %v", err)
+		}
+		if _, err := c.RecoverRotation(`"m"`); err == nil {
+			t.Errorf("%s: RecoverRotation accepted the journal", name)
+		}
+		if !c.Verify(testKey(1)) || !c.Verify(testKey(2)) {
+			t.Errorf("%s: a rejected journal changed the credentials", name)
+		}
+	}
+}
+
+func TestStageErrors(t *testing.T) {
 	c, path := newCredentials(t)
-	if err := c.Rotate(testKey(11), nil, nil); !errors.Is(err, ErrNotSetup) {
-		t.Fatalf("Rotate before setup = %v, want ErrNotSetup", err)
+	if _, err := c.Stage(testKey(11), nil, nil, `"m"`); !errors.Is(err, ErrNotSetup) {
+		t.Fatalf("Stage before setup = %v, want ErrNotSetup", err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Error("Rotate before setup created a credentials file")
+		t.Error("Stage before setup created a credentials file")
 	}
 
 	c, path = setupCredentials(t)
-	if err := c.Rotate(nil, nil, nil); !errors.Is(err, ErrNothingToRotate) {
-		t.Errorf("Rotate(nil, nil, nil) = %v, want ErrNothingToRotate", err)
+	if _, err := c.Stage(nil, nil, nil, `"m"`); !errors.Is(err, ErrNothingToRotate) {
+		t.Errorf("Stage(nil, nil, nil) = %v, want ErrNothingToRotate", err)
 	}
-	if err := c.Rotate(testKey(11)[:31], nil, nil); !errors.Is(err, ErrInvalidKey) {
-		t.Errorf("Rotate(short auth key) = %v, want ErrInvalidKey", err)
+	if _, err := c.Stage(testKey(11)[:31], nil, nil, `"m"`); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("Stage(short auth key) = %v, want ErrInvalidKey", err)
 	}
-	if err := c.Rotate(nil, testKey(12)[:31], nil); !errors.Is(err, ErrInvalidKey) {
-		t.Errorf("Rotate(short recovery key) = %v, want ErrInvalidKey", err)
+	if _, err := c.Stage(nil, testKey(12)[:31], nil, `"m"`); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("Stage(short recovery key) = %v, want ErrInvalidKey", err)
 	}
 	for name, kdf := range badKDFs() {
 		if kdf == "" {
 			continue // nil means keep
 		}
-		if err := c.Rotate(nil, nil, json.RawMessage(kdf)); !errors.Is(err, ErrInvalidKDF) {
-			t.Errorf("Rotate(%s kdf) = %v, want ErrInvalidKDF", name, err)
+		if _, err := c.Stage(nil, nil, json.RawMessage(kdf), `"m"`); !errors.Is(err, ErrInvalidKDF) {
+			t.Errorf("Stage(%s kdf) = %v, want ErrInvalidKDF", name, err)
 		}
 	}
 
-	// Nothing above touched the file or the in-memory state.
+	// Nothing above touched the files or the in-memory state.
 	if !c.Verify(testKey(1)) || !c.Verify(testKey(2)) || string(c.KDF()) != compactTestKDF {
-		t.Error("a rejected Rotate changed the in-memory credentials")
+		t.Error("a rejected Stage changed the in-memory credentials")
 	}
 	file := readFile(t, path)
 	if file.AuthKeyHash != hashOf(testKey(1)) || file.RecoveryAuthKeyHash != hashOf(testKey(2)) || string(file.KDF) != compactTestKDF {
-		t.Error("a rejected Rotate changed the credentials file")
+		t.Error("a rejected Stage changed the credentials file")
+	}
+	if _, err := os.Stat(path + ".next"); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a rejected Stage left a journal")
 	}
 }
 
-func TestRotateFailureKeepsOldCredentials(t *testing.T) {
+func TestStageFailureKeepsOldCredentials(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
@@ -322,23 +430,23 @@ func TestRotateFailureKeepsOldCredentials(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // see above
 
-	err := c.Rotate(testKey(11), testKey(12), json.RawMessage(`{"salt":"BBBB"}`))
+	_, err := c.Stage(testKey(11), testKey(12), json.RawMessage(`{"salt":"BBBB"}`), `"m"`)
 	if err == nil {
-		t.Fatal("Rotate succeeded in an unwritable directory")
+		t.Fatal("Stage succeeded in an unwritable directory")
 	}
 	if errors.Is(err, ErrInvalidKey) || errors.Is(err, ErrInvalidKDF) || errors.Is(err, ErrNotSetup) {
-		t.Fatalf("Rotate = %v, want a filesystem error", err)
+		t.Fatalf("Stage = %v, want a filesystem error", err)
 	}
 
 	if !c.Verify(testKey(1)) || !c.Verify(testKey(2)) || c.Verify(testKey(11)) || c.Verify(testKey(12)) {
-		t.Error("a failed Rotate changed the in-memory keys")
+		t.Error("a failed Stage changed the in-memory keys")
 	}
 	if got := string(c.KDF()); got != compactTestKDF {
-		t.Errorf("a failed Rotate changed the in-memory kdf to %s", got)
+		t.Errorf("a failed Stage changed the in-memory kdf to %s", got)
 	}
 	file := readFile(t, path)
 	if file.AuthKeyHash != hashOf(testKey(1)) || file.RecoveryAuthKeyHash != hashOf(testKey(2)) || string(file.KDF) != compactTestKDF {
-		t.Error("a failed Rotate changed the credentials file")
+		t.Error("a failed Stage changed the credentials file")
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -349,10 +457,54 @@ func TestRotateFailureKeepsOldCredentials(t *testing.T) {
 	}
 }
 
+// Once the journal is written and the manifest stored, the rotation is
+// durable: a Commit whose file write fails still puts the new credentials
+// in force, and the next start installs them from the journal.
+func TestCommitPersistFailureKeepsNewCredentialsInForce(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	c, path := setupCredentials(t)
+	r, err := c.Stage(testKey(11), nil, nil, `"new"`)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // see TestStageFailureKeepsOldCredentials
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // see above
+
+	if err := r.Commit(); err == nil {
+		t.Fatal("Commit succeeded in an unwritable directory")
+	}
+	if !c.Verify(testKey(11)) || c.Verify(testKey(1)) {
+		t.Error("a Commit that could not persist did not put the new credentials in force")
+	}
+
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // see above
+		t.Fatalf("chmod: %v", err)
+	}
+	restarted, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if installed, err := restarted.RecoverRotation(`"new"`); err != nil || !installed {
+		t.Fatalf("RecoverRotation = %v, %v; want true, nil", installed, err)
+	}
+	if !restarted.Verify(testKey(11)) || restarted.Verify(testKey(1)) {
+		t.Error("the restart did not install the staged credentials")
+	}
+}
+
 func TestLoadCredentials(t *testing.T) {
 	c, path := setupCredentials(t)
-	if err := c.Rotate(testKey(3), nil, nil); err != nil {
-		t.Fatalf("Rotate: %v", err)
+	r, err := c.Stage(testKey(3), nil, nil, `"m"`)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if err := r.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
 	}
 
 	reloaded, err := LoadCredentials(path)

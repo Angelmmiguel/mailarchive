@@ -11,7 +11,8 @@ import { session } from '$lib/state/session.svelte';
 import { terms } from '$lib/state/terms.svelte';
 import { MemoryCache } from '$lib/cache/blobs';
 import { createTestAccount, mockApi, type MockApi, type TestAccount } from '$lib/testing/account';
-import { inlineParser, ParserClosedError } from './parser';
+import { LockedError } from '$lib/account/errors';
+import { inlineParser, ParserClosedError, type Parser } from './parser';
 import { MAX_FILE_BYTES, runImport, SEGMENT_MESSAGES } from './run';
 import type { ImportFile } from './sources';
 
@@ -217,5 +218,31 @@ describe('runImport', () => {
 		controller.abort();
 		const stopped = await runImport(list, 'x', { api, parser, signal: controller.signal });
 		expect(stopped).toMatchObject({ failed: 0, added: 0, cancelled: true });
+	});
+});
+
+describe('runImport across a lock', () => {
+	it('seals and uploads nothing once the session locked while a message was parsed', async () => {
+		const inner = inlineParser();
+		const parser: Parser = {
+			prepare: async (bytes) => {
+				const prepared = await inner.prepare(bytes);
+				session.lock();
+				return prepared;
+			},
+			close: () => inner.close()
+		};
+
+		await expect(
+			runImport(await files('report.eml'), 'test', {
+				api,
+				cache,
+				parser,
+				signal: new AbortController().signal
+			})
+		).rejects.toThrow(LockedError);
+		expect(api.putBlob).not.toHaveBeenCalled();
+		expect(api.putManifest).not.toHaveBeenCalled();
+		expect(index.messages).toBe(0);
 	});
 });

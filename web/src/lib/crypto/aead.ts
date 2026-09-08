@@ -28,8 +28,21 @@ export class SealError extends Error {
 	}
 }
 
-/** Encrypts `plaintext`, binding `aad` so the result is only valid in that role. */
+/** A key of all zeros: what a lock leaves behind, never a key to use. */
+export class ZeroKeyError extends Error {
+	constructor() {
+		super('the key has been zeroed');
+		this.name = 'ZeroKeyError';
+	}
+}
+
+/**
+ * Encrypts `plaintext`, binding `aad` so the result is only valid in that
+ * role. A key of all zeros is refused: lock zeroes keys in place, and work
+ * still in flight must fail rather than seal anything under nothing.
+ */
 export function seal(key: Uint8Array, plaintext: Uint8Array, aad: string): Bytes {
+	if (key.every((b) => b === 0)) throw new ZeroKeyError();
 	const nonce = randomBytes(NONCE_LENGTH);
 	const cipher = xchacha20poly1305(key, nonce, new TextEncoder().encode(aad));
 	const out = new Uint8Array(OVERHEAD + plaintext.length);

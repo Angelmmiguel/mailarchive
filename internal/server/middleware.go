@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"runtime/debug"
 	"strings"
@@ -19,6 +20,24 @@ func (s *Server) requireSession(next http.HandlerFunc) http.Handler {
 			return
 		}
 		next(w, r)
+	})
+}
+
+// bodyDeadline bounds how long a request may take to arrive in full. The
+// http.Server only times out the request head, deliberately, because blob
+// transfers are large and slow links are normal; without a bound on the
+// body, though, a client could open a request and never finish it, holding
+// a goroutine and a connection for as long as it likes. Blob uploads get
+// the longer allowance. A writer that cannot carry a deadline (a test
+// recorder) is left alone.
+func (s *Server) bodyDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d := s.cfg.BodyTimeout
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/blobs/") {
+			d = s.cfg.BlobTimeout
+		}
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(d))
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -79,7 +98,8 @@ func sameOrigin(r *http.Request) bool {
 	return true
 }
 
-// logRequests logs one line per request. Bodies are never touched.
+// logRequests logs one line per request. Bodies and query strings are never
+// touched.
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -91,7 +111,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			"status", rec.statusCode(),
 			"bytes", rec.written,
 			"duration_ms", time.Since(start).Milliseconds(),
-			"remote", clientIP(r),
+			"remote", s.clientIP(r),
 		)
 	})
 }
@@ -158,15 +178,38 @@ func (r *recorder) statusCode() int {
 
 func isAPIPath(path string) bool { return strings.HasPrefix(path, "/api/") }
 
-// clientIP returns the address the connection came from.
+// clientIP returns the address a request came from: the connection's peer,
+// or, when that peer is a trusted proxy, the address the proxy reports.
 //
-// X-Forwarded-For and friends are deliberately ignored: they are
-// attacker-controlled unless a trusted proxy rewrites them, and honouring them
-// would let a single client sidestep the login rate limiter.
-func clientIP(r *http.Request) string {
+// X-Forwarded-For is only believed from a trusted proxy, and only its last
+// entry, the one that proxy appended: everything before it is whatever the
+// client chose to send, and honouring it would let a single client sidestep
+// the login rate limiter.
+func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !s.trustedProxy(peer.Unmap()) {
+		return host
+	}
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if i := strings.LastIndexByte(forwarded, ','); i >= 0 {
+		forwarded = forwarded[i+1:]
+	}
+	client, err := netip.ParseAddr(strings.TrimSpace(forwarded))
+	if err != nil {
+		return host
+	}
+	return client.Unmap().WithZone("").String()
+}
+
+func (s *Server) trustedProxy(addr netip.Addr) bool {
+	for _, p := range s.cfg.TrustedProxies {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }

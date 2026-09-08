@@ -295,3 +295,17 @@ describe('commitSegment', () => {
 		expect(api.putManifest).toHaveBeenCalledTimes(3);
 	});
 });
+
+describe('commitSegment after a lock', () => {
+	it('keeps a manifest committed during a lock out of the closed session', async () => {
+		unlockWith([]);
+		const segment: SegmentRef = { id: 'c'.repeat(64), createdAt: 't', messages: 1, shards: [] };
+		api.putManifest.mockImplementation(() => {
+			session.lock();
+			return Promise.resolve({ etag: '"v2"' });
+		});
+
+		await expect(commitSegment(segment, { api })).rejects.toThrow(LockedError);
+		expect(session.manifest).toBeNull();
+	});
+});

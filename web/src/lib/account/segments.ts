@@ -190,6 +190,9 @@ export async function commitSegment(
 		try {
 			const data = encodeManifest({ header: current.header, body }, keys.manifest);
 			const { etag } = await call(deps.api.putManifest(data, current.etag));
+			// A lock while the write was out zeroed `keys`: the manifest went to
+			// the server, but nothing of it may stay here.
+			if (session.keys !== keys) throw new LockedError();
 			session.manifest = { header: current.header, body, etag };
 			return;
 		} catch (e) {

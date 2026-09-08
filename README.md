@@ -71,9 +71,19 @@ docker run -d --name mailarchive -p 8989:8080 -v "$PWD/data:/data" angelrb/maila
 ```
 
 The host directory must belong to uid 99, because the archive is written
-0700/0600. Set `MAILARCHIVE_SECURE=true` when the app is served over HTTPS
-by a reverse proxy; it marks the session cookie Secure, so leave it off on
-a plain-HTTP LAN.
+0700/0600. The server speaks plain HTTP; put a reverse proxy in front of it
+for TLS, and then set two variables: `MAILARCHIVE_SECURE=true`, which marks
+the session cookie Secure (leave it off on a plain-HTTP LAN, where it would
+stop the cookie from being sent), and `MAILARCHIVE_TRUSTED_PROXIES` with the
+proxy's address or CIDR range, so that the login rate limit counts per client
+rather than per proxy. Without the second, every visitor behind the proxy
+shares one budget of attempts.
+
+Run outside Docker, the binary listens on `127.0.0.1:8080` unless `--addr`
+or `MAILARCHIVE_ADDR` says otherwise (`:8080` for every interface); an
+archive that has not been set up belongs to whoever reaches it first, so it
+should not be reachable by strangers until it has been. The image listens
+on every interface of the container, as a container must.
 
 **Unraid.** [unraid/mailarchive.xml](unraid/mailarchive.xml) is a Docker
 template with the port, archive path and the variables above. Copy it to

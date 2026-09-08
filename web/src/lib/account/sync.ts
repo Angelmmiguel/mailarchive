@@ -16,16 +16,18 @@ export const SYNC_INTERVAL = 60_000;
 /** Adopts a newer manifest and returns how many segments it brought. */
 export async function checkForSegments(deps: Pick<Deps, 'api'> = defaultDeps): Promise<number> {
 	const dek = session.dek;
-	if (session.status !== 'unlocked' || dek === null || session.manifest === null) {
+	const held = session.manifest;
+	if (session.status !== 'unlocked' || dek === null || held === null) {
 		throw new LockedError();
 	}
 	const fetched = await call(deps.api.getManifest());
-	if (fetched === null || fetched.etag === session.manifest.etag) return 0;
+	// The check may have crossed a commit or a lock. A commit made the held
+	// manifest newer than what was fetched, whatever the ETags say, so only
+	// a fetch that started and ended on the same manifest may move it.
+	if (fetched === null || session.manifest !== held || fetched.etag === held.etag) return 0;
 	const opened = openManifest(dek, fetched);
-	// The check may have crossed a commit or a lock; only move forward.
-	const current = session.manifest;
-	if (session.status !== 'unlocked' || current === null || current.etag === fetched.etag) return 0;
-	const known = new Set(current.body.segments.map((s) => s.id));
+	if (session.status !== 'unlocked' || session.manifest !== held) return 0;
+	const known = new Set(held.body.segments.map((s) => s.id));
 	session.manifest = opened;
 	return opened.body.segments.filter((s) => !known.has(s.id)).length;
 }

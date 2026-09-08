@@ -24,7 +24,7 @@
 		"@noble/hashes": "2.4.0",
 		"@scure/base": "2.4.0",
 		"@scure/bip39": "2.4.0",
-		"dompurify": "3.3.1",
+		"dompurify": "3.4.14",
 		"postal-mime": "3.0.0"
 	},
 	"devDependencies": {

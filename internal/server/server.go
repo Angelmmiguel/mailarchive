@@ -6,6 +6,9 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"net/netip"
+	"sync"
+	"time"
 
 	"github.com/Angelmmiguel/mailarchive/internal/auth"
 	"github.com/Angelmmiguel/mailarchive/internal/store"
@@ -16,13 +19,19 @@ const (
 	DefaultMaxBlobBytes     = 64 << 20 // 64 MiB
 	DefaultMaxManifestBytes = 16 << 20 // 16 MiB
 	DefaultMaxExistsIDs     = 10000
+	// DefaultBodyTimeout is how long a request other than a blob upload may
+	// take to arrive in full, a 16 MiB manifest over a slow link included.
+	DefaultBodyTimeout = 2 * time.Minute
+	// DefaultBlobTimeout is how long a blob upload may take to arrive: a
+	// 64 MiB blob over a 1 Mbit/s link needs nine minutes.
+	DefaultBlobTimeout = 15 * time.Minute
 )
 
 // sessionCookie is the name of the session cookie set on login.
 const sessionCookie = "mailarchive_session"
 
-// Config configures a Server. The zero value of every size field falls back to
-// the corresponding default.
+// Config configures a Server. The zero value of every size and duration
+// field falls back to the corresponding default.
 type Config struct {
 	// MaxBlobBytes is the largest accepted blob body.
 	MaxBlobBytes int64
@@ -30,6 +39,18 @@ type Config struct {
 	MaxManifestBytes int64
 	// MaxExistsIDs is the largest accepted batch for POST /api/blobs/exists.
 	MaxExistsIDs int
+	// BodyTimeout bounds how long a request may take to arrive in full,
+	// blob uploads aside; a body that never completes is cut off, so that
+	// it cannot hold a connection open for as long as the sender likes.
+	BodyTimeout time.Duration
+	// BlobTimeout is BodyTimeout for blob uploads, which are large.
+	BlobTimeout time.Duration
+	// TrustedProxies are the addresses a reverse proxy in front of the
+	// server connects from. For a connection from one of them the client
+	// address, which keys the rate limiter, is the last address the proxy
+	// appended to X-Forwarded-For; from anywhere else that header is
+	// ignored, since a client can write anything into it.
+	TrustedProxies []netip.Prefix
 	// Secure marks the session cookie Secure. Leave it false only on a plain
 	// HTTP LAN deployment.
 	Secure bool
@@ -48,6 +69,12 @@ type Server struct {
 	limiter  *auth.RateLimiter
 	log      *slog.Logger
 	handler  http.Handler
+
+	// accountMu serialises what reads or changes the account as a whole:
+	// setup, login and rekey. Each of those is several steps against the
+	// credentials, the manifest and the sessions, and the steps of two of
+	// them must not interleave.
+	accountMu sync.Mutex
 }
 
 // New wires a Server from its dependencies and applies Config defaults.
@@ -60,6 +87,12 @@ func New(cfg Config, st store.Store, creds *auth.Credentials, sessions *auth.Ses
 	}
 	if cfg.MaxExistsIDs <= 0 {
 		cfg.MaxExistsIDs = DefaultMaxExistsIDs
+	}
+	if cfg.BodyTimeout <= 0 {
+		cfg.BodyTimeout = DefaultBodyTimeout
+	}
+	if cfg.BlobTimeout <= 0 {
+		cfg.BlobTimeout = DefaultBlobTimeout
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -116,5 +149,5 @@ func (s *Server) routes() http.Handler {
 		})
 	}
 
-	return s.recoverer(s.logRequests(securityHeaders(csrf(mux))))
+	return s.recoverer(s.logRequests(s.bodyDeadline(securityHeaders(csrf(mux)))))
 }

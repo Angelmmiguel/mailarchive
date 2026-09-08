@@ -94,3 +94,57 @@ func TestRateLimiterConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// A stream of distinct addresses within one window must not make every
+// Allow scan the whole map: the sweep runs once per window.
+func TestRateLimiterSweepsOncePerWindow(t *testing.T) {
+	l, advance := newTestLimiter(t, 1, time.Minute)
+
+	for i := range purgeThreshold + 10 {
+		l.Allow(fmt.Sprintf("10.0.%d.%d", i/256, i%256))
+	}
+	l.mu.Lock()
+	first := l.nextPurge
+	l.mu.Unlock()
+	if first.IsZero() {
+		t.Fatal("no sweep was scheduled above the threshold")
+	}
+
+	advance(30 * time.Second)
+	l.Allow("10.1.0.1")
+	l.mu.Lock()
+	second, n := l.nextPurge, len(l.buckets)
+	l.mu.Unlock()
+	if !second.Equal(first) {
+		t.Errorf("a second sweep ran within the window: next = %v, want %v", second, first)
+	}
+	if n != purgeThreshold+11 {
+		t.Errorf("%d buckets, want %d: nothing had expired", n, purgeThreshold+11)
+	}
+
+	advance(time.Minute)
+	l.Allow("10.1.0.2")
+	l.mu.Lock()
+	n = len(l.buckets)
+	l.mu.Unlock()
+	if n != 1 {
+		t.Errorf("%d buckets after the window, want 1", n)
+	}
+}
+
+func TestRateLimiterBoundsItsMemory(t *testing.T) {
+	l, _ := newTestLimiter(t, 1, time.Minute)
+
+	for i := range maxBuckets + 1 {
+		l.Allow(fmt.Sprintf("%d", i))
+	}
+	l.mu.Lock()
+	n := len(l.buckets)
+	l.mu.Unlock()
+	if n > maxBuckets {
+		t.Fatalf("%d buckets, want at most %d", n, maxBuckets)
+	}
+	if !l.Allow("fresh") {
+		t.Error("a fresh address was refused after the reset")
+	}
+}

@@ -24,6 +24,9 @@ var (
 	// ErrIfMatchRequired is returned by PutManifest when a manifest exists but
 	// the caller supplied no ETag to compare against.
 	ErrIfMatchRequired = errors.New("store: if-match required")
+	// ErrLocked is returned by NewFS when another process holds the data
+	// directory.
+	ErrLocked = errors.New("store: data dir is locked by another process")
 )
 
 // IDLen is the exact length of a blob id in characters.

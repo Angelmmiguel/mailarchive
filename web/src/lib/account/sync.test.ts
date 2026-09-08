@@ -54,3 +54,32 @@ describe('checkForSegments', () => {
 		await expect(checkForSegments({ api })).rejects.toThrow(LockedError);
 	});
 });
+
+describe('checkForSegments crossing a commit', () => {
+	it('does not let a response that started before a commit undo it', async () => {
+		const keys = deriveSubkeys(account.dek);
+		const committed = { ...account.body, segments: [segment('a'), segment('b')] };
+		api.getManifest.mockImplementation(() => {
+			// While the fetch was out, this device committed a segment.
+			session.manifest = { header: account.header, body: committed, etag: '"v2"' };
+			return Promise.resolve({
+				data: encodeManifest({ header: account.header, body: account.body }, keys.manifest),
+				etag: '"v0"'
+			});
+		});
+
+		expect(await checkForSegments({ api })).toBe(0);
+		expect(session.manifest?.etag).toBe('"v2"');
+		expect(session.manifest?.body.segments.map((s) => s.id[0])).toEqual(['a', 'b']);
+	});
+
+	it('does nothing after a lock that crossed the fetch', async () => {
+		api.getManifest.mockImplementation(() => {
+			session.lock();
+			return Promise.resolve({ data: account.manifest, etag: '"v9"' });
+		});
+
+		expect(await checkForSegments({ api })).toBe(0);
+		expect(session.manifest).toBeNull();
+	});
+});

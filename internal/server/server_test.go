@@ -41,7 +41,13 @@ var recoveryKey = authKey(200)
 const defaultKDF = `{"name":"argon2id","m":65536,"t":3,"p":1,"salt":"AAAA"}`
 
 // setupManifest is the manifest the setup helper stores.
-const setupManifest = "manifest-v0"
+var setupManifest = envelope("v0")
+
+// envelope builds a manifest as the client stores it: the header the server
+// holds session-only writes to, around a body standing in for the sealed one.
+func envelope(body string) string {
+	return `{"version":1,"kdf":` + defaultKDF + `,"wrapped":{"passphrase":"p","recovery":"r"},"body":` + quote(body) + `}`
+}
 
 type harness struct {
 	t       *testing.T
@@ -85,6 +91,7 @@ func newHarness(t *testing.T, opts ...func(*options)) *harness {
 	if err != nil {
 		t.Fatalf("LoadCredentials: %v", err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
 	srv := httptest.NewServer(server.New(o.cfg, st, creds, auth.NewSessionStore(time.Hour, 24*time.Hour), o.limiter))
 	t.Cleanup(srv.Close)
 
@@ -295,13 +302,13 @@ func TestLifecycle(t *testing.T) {
 	var updated struct {
 		ETag string `json:"etag"`
 	}
-	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("manifest-v1"),
+	h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader(envelope("v1")),
 		"If-Match", created), http.StatusOK).decode(t, &updated)
 	if updated.ETag == "" || updated.ETag == created {
 		t.Fatalf("etag after the update = %q, want a new one", updated.ETag)
 	}
 	got = h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK)
-	if string(got.body) != "manifest-v1" || got.header.Get("ETag") != updated.ETag {
+	if string(got.body) != envelope("v1") || got.header.Get("ETag") != updated.ETag {
 		t.Fatalf("manifest = %q with ETag %q, want manifest-v1 with %q", got.body, got.header.Get("ETag"), updated.ETag)
 	}
 
@@ -435,7 +442,8 @@ func (h *harness) mustNotSetup() {
 }
 
 func TestSetupManifest(t *testing.T) {
-	h := newHarness(t, func(o *options) { o.cfg.MaxManifestBytes = 16 })
+	want := envelope("y")
+	h := newHarness(t, func(o *options) { o.cfg.MaxManifestBytes = int64(len(want)) })
 	fields := `"auth_key":` + quote(authKey(1)) + `,"recovery_auth_key":` + quote(recoveryKey) + `,"kdf":` + defaultKDF
 
 	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`}`), http.StatusBadRequest).errorCode(t); got != "bad_request" {
@@ -445,17 +453,30 @@ func TestSetupManifest(t *testing.T) {
 	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":"not base64!"}`), http.StatusBadRequest).errorCode(t); got != "bad_request" {
 		t.Errorf("bad manifest: error = %q, want bad_request", got)
 	}
+	// Bytes that are not a manifest envelope: the server holds the kdf and
+	// wrapped fields of every later session-only write to the stored ones,
+	// so it must be able to read them off what setup stores.
+	for name, manifest := range map[string]string{
+		"not json":       "nonsense",
+		"not an object":  `["kdf"]`,
+		"no wrapped":     `{"version":1,"kdf":` + defaultKDF + `,"body":"x"}`,
+		"no kdf":         `{"version":1,"wrapped":{"passphrase":"p","recovery":"r"},"body":"x"}`,
+		"kdf not object": `{"version":1,"kdf":1,"wrapped":{},"body":"x"}`,
+	} {
+		if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(manifest))+`}`), http.StatusBadRequest).errorCode(t); got != "bad_request" {
+			t.Errorf("%s: error = %q, want bad_request", name, got)
+		}
+	}
 	// Over the limit, whether it fits the body limit or not.
-	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(strings.Repeat("x", 17)))+`}`),
+	if got := h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(envelope("yy")))+`}`),
 		http.StatusRequestEntityTooLarge).errorCode(t); got != "too_large" {
 		t.Errorf("large manifest: error = %q, want too_large", got)
 	}
-	h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(strings.Repeat("x", 64<<10)))+`}`),
+	h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(envelope(strings.Repeat("x", 64<<10))))+`}`),
 		http.StatusRequestEntityTooLarge)
 	h.mustNotSetup()
 
 	// Exactly at the limit goes through, and login reads it back verbatim.
-	want := strings.Repeat("y", 16)
 	h.mustStatus(h.postJSON("/api/setup", `{`+fields+`,"manifest":`+quote(b64(want))+`}`), http.StatusCreated)
 	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
 	got := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK)
@@ -547,28 +568,28 @@ func TestAuthenticationRequired(t *testing.T) {
 
 func TestManifestPreconditions(t *testing.T) {
 	h := loggedIn(t)
-	h.putManifest("v1")
+	h.putManifest(envelope("v1"))
 
-	got := h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("v2")), http.StatusPreconditionRequired)
+	got := h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader(envelope("v2"))), http.StatusPreconditionRequired)
 	if code := got.errorCode(t); code != "if_match_required" {
 		t.Errorf("error = %q, want if_match_required", code)
 	}
-	got = h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader("v2"),
+	got = h.mustStatus(h.do(http.MethodPut, "/api/manifest", strings.NewReader(envelope("v2")),
 		"If-Match", `"0000"`), http.StatusPreconditionFailed)
 	if code := got.errorCode(t); code != "conflict" {
 		t.Errorf("error = %q, want conflict", code)
 	}
 
 	// The manifest is untouched by the rejected writes.
-	if body := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK).body; string(body) != "v1" {
+	if body := h.mustStatus(h.do(http.MethodGet, "/api/manifest", nil), http.StatusOK).body; string(body) != envelope("v1") {
 		t.Fatalf("manifest = %q, want v1", body)
 	}
 }
 
 func TestManifestTooLarge(t *testing.T) {
-	h := loggedIn(t, func(o *options) { o.cfg.MaxManifestBytes = 16 })
+	h := loggedIn(t, func(o *options) { o.cfg.MaxManifestBytes = int64(len(setupManifest)) })
 
-	r := h.do(http.MethodPut, "/api/manifest", strings.NewReader(strings.Repeat("x", 64)))
+	r := h.do(http.MethodPut, "/api/manifest", strings.NewReader(envelope("v0x")), "If-Match", h.manifestETag())
 	if r.status != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", r.status)
 	}
@@ -841,13 +862,13 @@ func TestLoginAcceptsEitherKey(t *testing.T) {
 
 func TestRekey(t *testing.T) {
 	h := loggedIn(t)
-	etag := h.putManifest("manifest-v1")
+	etag := h.putManifest(envelope("v1"))
 
 	// New passphrase key.
 	var out struct {
 		ETag string `json:"etag"`
 	}
-	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("manifest-v2"), ifMatch: etag}), http.StatusOK)
+	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("v2")), ifMatch: etag}), http.StatusOK)
 	r.decode(t, &out)
 	if out.ETag == "" || out.ETag == etag {
 		t.Fatalf("etag after rekey = %q, want a new one", out.ETag)
@@ -855,7 +876,7 @@ func TestRekey(t *testing.T) {
 	if r.header.Get("ETag") != out.ETag {
 		t.Errorf("ETag header = %q, want %q", r.header.Get("ETag"), out.ETag)
 	}
-	if got := h.manifest(); got != "manifest-v2" {
+	if got := h.manifest(); got != envelope("v2") {
 		t.Errorf("manifest = %q, want manifest-v2", got)
 	}
 	// The session that rekeyed stays alive.
@@ -868,23 +889,23 @@ func TestRekey(t *testing.T) {
 	etag = out.ETag
 
 	// New recovery key only, proven with the rotated passphrase key.
-	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), recoveryKey: authKey(12), manifest: b64("manifest-v3"), ifMatch: etag}), http.StatusOK).decode(t, &out)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), recoveryKey: authKey(12), manifest: b64(envelope("v3")), ifMatch: etag}), http.StatusOK).decode(t, &out)
 	etag = out.ETag
 	other.mustStatus(other.login(recoveryKey), http.StatusUnauthorized)
 	other.mustStatus(other.login(authKey(12)), http.StatusNoContent)
 	other.mustStatus(other.login(authKey(11)), http.StatusNoContent)
-	if got := h.manifest(); got != "manifest-v3" {
+	if got := h.manifest(); got != envelope("v3") {
 		t.Errorf("manifest = %q, want manifest-v3", got)
 	}
 
 	// New kdf only, sent with whitespace and served compacted.
 	newKDF := `{"name":"argon2id","m":262144,"t":4,"p":2,"salt":"BBBB"}`
 	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), kdf: `{ "name": "argon2id", "m": 262144, "t": 4, "p": 2, "salt": "BBBB" }`,
-		manifest: b64("manifest-v4"), ifMatch: etag}), http.StatusOK).decode(t, &out)
+		manifest: b64(envelope("v4")), ifMatch: etag}), http.StatusOK).decode(t, &out)
 	if body := h.mustStatus(h.do(http.MethodGet, "/api/kdf", nil), http.StatusOK).body; string(body) != newKDF {
 		t.Errorf("kdf = %s, want %s", body, newKDF)
 	}
-	if got := h.manifest(); got != "manifest-v4" {
+	if got := h.manifest(); got != envelope("v4") {
 		t.Errorf("manifest = %q, want manifest-v4", got)
 	}
 
@@ -914,12 +935,12 @@ func TestRekey(t *testing.T) {
 }
 
 func TestRekeyErrors(t *testing.T) {
-	h := loggedIn(t, func(o *options) { o.cfg.MaxManifestBytes = 64 })
-	etag := h.putManifest("manifest-v1")
+	h := loggedIn(t, func(o *options) { o.cfg.MaxManifestBytes = int64(len(envelope("v1"))) })
+	etag := h.putManifest(envelope("v1"))
 
 	unchanged := func(context string) {
 		t.Helper()
-		if got := h.manifest(); got != "manifest-v1" {
+		if got := h.manifest(); got != envelope("v1") {
 			t.Errorf("%s: manifest = %q, want manifest-v1", context, got)
 		}
 		other := h.newClient()
@@ -928,33 +949,33 @@ func TestRekeyErrors(t *testing.T) {
 
 	// The session is not enough: the current credential is mandatory, and it
 	// must be a valid one.
-	r := h.mustStatus(h.rekey(rekeyRequest{authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	r := h.mustStatus(h.rekey(rekeyRequest{authKey: authKey(11), manifest: b64(envelope("x")), ifMatch: etag}), http.StatusBadRequest)
 	if got := r.errorCode(t); got != "invalid_auth_key" {
 		t.Errorf("missing current key: error = %q, want invalid_auth_key", got)
 	}
 	unchanged("missing current key")
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64(envelope("x")), ifMatch: etag}), http.StatusUnauthorized)
 	if got := r.errorCode(t); got != "wrong_credential" {
 		t.Errorf("wrong current key: error = %q, want wrong_credential", got)
 	}
 	unchanged("wrong current key")
 
 	// None of the three optional fields.
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), manifest: b64(envelope("x")), ifMatch: etag}), http.StatusBadRequest)
 	if got := r.errorCode(t); got != "bad_request" {
 		t.Errorf("no fields: error = %q, want bad_request", got)
 	}
 	unchanged("no fields")
 
 	// Stale precondition.
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x"), ifMatch: `"0000"`}), http.StatusPreconditionFailed)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("x")), ifMatch: `"0000"`}), http.StatusPreconditionFailed)
 	if got := r.errorCode(t); got != "conflict" {
 		t.Errorf("stale etag: error = %q, want conflict", got)
 	}
 	unchanged("stale etag")
 
 	// Missing precondition when a manifest exists.
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x")}), http.StatusPreconditionRequired)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("x"))}), http.StatusPreconditionRequired)
 	if got := r.errorCode(t); got != "if_match_required" {
 		t.Errorf("missing etag: error = %q, want if_match_required", got)
 	}
@@ -965,19 +986,19 @@ func TestRekeyErrors(t *testing.T) {
 	if got := r.errorCode(t); got != "bad_request" {
 		t.Errorf("bad manifest: error = %q, want bad_request", got)
 	}
-	r = h.mustStatus(h.rekey(rekeyRequest{current: "not base64!", authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: "not base64!", authKey: authKey(11), manifest: b64(envelope("x")), ifMatch: etag}), http.StatusBadRequest)
 	if got := r.errorCode(t); got != "invalid_auth_key" {
 		t.Errorf("bad current key: error = %q, want invalid_auth_key", got)
 	}
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: "not base64!", manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: "not base64!", manifest: b64(envelope("x")), ifMatch: etag}), http.StatusBadRequest)
 	if got := r.errorCode(t); got != "invalid_auth_key" {
 		t.Errorf("bad auth key: error = %q, want invalid_auth_key", got)
 	}
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), recoveryKey: authKey(11)[:10], manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), recoveryKey: authKey(11)[:10], manifest: b64(envelope("x")), ifMatch: etag}), http.StatusBadRequest)
 	if got := r.errorCode(t); got != "invalid_auth_key" {
 		t.Errorf("bad recovery key: error = %q, want invalid_auth_key", got)
 	}
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), kdf: `[1]`, manifest: b64("x"), ifMatch: etag}), http.StatusBadRequest)
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), kdf: `[1]`, manifest: b64(envelope("x")), ifMatch: etag}), http.StatusBadRequest)
 	if got := r.errorCode(t); got != "invalid_kdf" {
 		t.Errorf("bad kdf: error = %q, want invalid_kdf", got)
 	}
@@ -985,32 +1006,32 @@ func TestRekeyErrors(t *testing.T) {
 	unchanged("malformed fields")
 
 	// Manifest over the limit, whether it fits the body limit or not.
-	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(strings.Repeat("x", 65)), ifMatch: etag}),
+	r = h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("v1x")), ifMatch: etag}),
 		http.StatusRequestEntityTooLarge)
 	if got := r.errorCode(t); got != "too_large" {
 		t.Errorf("large manifest: error = %q, want too_large", got)
 	}
-	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(strings.Repeat("x", 64<<10)), ifMatch: etag}),
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope(strings.Repeat("x", 64<<10))), ifMatch: etag}),
 		http.StatusRequestEntityTooLarge)
 	unchanged("large manifest")
 
 	// A manifest exactly at the limit goes through.
-	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(strings.Repeat("y", 64)), ifMatch: etag}), http.StatusOK)
-	if got := h.manifest(); got != strings.Repeat("y", 64) {
-		t.Errorf("manifest = %q, want 64 y's", got)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("y1")), ifMatch: etag}), http.StatusOK)
+	if got := h.manifest(); got != envelope("y1") {
+		t.Errorf("manifest = %q, want %q", got, envelope("y1"))
 	}
 }
 
 func TestRekeyRevokesOtherSessions(t *testing.T) {
 	h := loggedIn(t)
-	etag := h.putManifest("manifest-v1")
+	etag := h.putManifest(envelope("v1"))
 
 	other := h.newClient()
 	other.mustStatus(other.login(authKey(1)), http.StatusNoContent)
 	other.mustStatus(other.do(http.MethodPut, "/api/session/key", strings.NewReader(`{"key":`+quote(authKey(9))+`}`)), http.StatusNoContent)
 	h.mustStatus(h.do(http.MethodPut, "/api/session/key", strings.NewReader(`{"key":`+quote(authKey(8))+`}`)), http.StatusNoContent)
 
-	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("manifest-v2"), ifMatch: etag}), http.StatusOK)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("v2")), ifMatch: etag}), http.StatusOK)
 
 	other.mustStatus(other.do(http.MethodGet, "/api/blobs", nil), http.StatusUnauthorized)
 	other.mustStatus(other.do(http.MethodGet, "/api/session/key", nil), http.StatusUnauthorized)
@@ -1025,8 +1046,8 @@ func TestRekeyRevokesOtherSessions(t *testing.T) {
 
 	// A rejected rekey revokes nothing.
 	other.mustStatus(other.login(authKey(11)), http.StatusNoContent)
-	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), authKey: authKey(12), manifest: b64("manifest-v3"), ifMatch: `"stale"`}), http.StatusPreconditionFailed)
-	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(12), manifest: b64("manifest-v3"), ifMatch: `"stale"`}), http.StatusUnauthorized)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(11), authKey: authKey(12), manifest: b64(envelope("v3")), ifMatch: `"stale"`}), http.StatusPreconditionFailed)
+	h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(12), manifest: b64(envelope("v3")), ifMatch: `"stale"`}), http.StatusUnauthorized)
 	other.mustStatus(other.do(http.MethodGet, "/api/blobs", nil), http.StatusOK)
 }
 
@@ -1034,10 +1055,10 @@ func TestRekeyRevokesOtherSessions(t *testing.T) {
 // credential as much as the passphrase one.
 func TestRekeyWithRecoveryKey(t *testing.T) {
 	h := loggedIn(t)
-	etag := h.putManifest("manifest-v1")
+	etag := h.putManifest(envelope("v1"))
 
-	h.mustStatus(h.rekey(rekeyRequest{current: recoveryKey, authKey: authKey(11), manifest: b64("manifest-v2"), ifMatch: etag}), http.StatusOK)
-	if got := h.manifest(); got != "manifest-v2" {
+	h.mustStatus(h.rekey(rekeyRequest{current: recoveryKey, authKey: authKey(11), manifest: b64(envelope("v2")), ifMatch: etag}), http.StatusOK)
+	if got := h.manifest(); got != envelope("v2") {
 		t.Errorf("manifest = %q, want manifest-v2", got)
 	}
 	other := h.newClient()
@@ -1050,23 +1071,23 @@ func TestRekeyRateLimit(t *testing.T) {
 	h := loggedIn(t, func(o *options) {
 		o.limiter = auth.NewRateLimiter(5, time.Minute)
 	})
-	etag := h.putManifest("manifest-v1")
+	etag := h.putManifest(envelope("v1"))
 
 	for range 3 {
-		r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusUnauthorized)
+		r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(9), authKey: authKey(11), manifest: b64(envelope("x")), ifMatch: etag}), http.StatusUnauthorized)
 		if got := r.errorCode(t); got != "wrong_credential" {
 			t.Errorf("error = %q, want wrong_credential", got)
 		}
 	}
 	// The right credential is refused too while the window lasts.
-	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64("x"), ifMatch: etag}), http.StatusTooManyRequests)
+	r := h.mustStatus(h.rekey(rekeyRequest{current: authKey(1), authKey: authKey(11), manifest: b64(envelope("x")), ifMatch: etag}), http.StatusTooManyRequests)
 	if got := r.errorCode(t); got != "rate_limited" {
 		t.Errorf("error = %q, want rate_limited", got)
 	}
 
 	// Nothing was written. The credentials are checked from disk, since a
 	// login would be rate limited as well.
-	if got := h.manifest(); got != "manifest-v1" {
+	if got := h.manifest(); got != envelope("v1") {
 		t.Errorf("manifest = %q, want manifest-v1", got)
 	}
 	creds, err := auth.LoadCredentials(filepath.Join(h.dataDir, "auth.json"))

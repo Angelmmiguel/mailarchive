@@ -7,9 +7,13 @@ ever stores ciphertext. Reading, searching and importing all happen client-side.
 ## Principles
 
 - **Zero knowledge.** The server never sees plaintext or keys. It stores opaque
-  blobs and serves static assets. A full server compromise yields ciphertext,
-  blob sizes and upload timing, nothing that reconstructs a message, a subject,
-  a sender or a search term.
+  blobs and serves static assets. A copy of its storage, or a compromise of
+  the server that leaves the client it serves untouched, yields ciphertext,
+  blob sizes and upload timing, nothing that reconstructs a message, a
+  subject, a sender or a search term. The guarantee stops there: the same
+  server delivers the JavaScript that takes the passphrase, and a server
+  that has been made to serve a different client can obtain whatever that
+  client sees. The CSP does not defend against the origin itself.
 - **Browser does the work.** Parsing, indexing, encryption and decryption run in
   the web app (Web Workers). There is no trusted local CLI.
 - **Append-only, deduplicated.** Every import produces an immutable segment.
@@ -151,7 +155,10 @@ DEK, 32 random bytes, protects the whole archive
   others.
 - **DEK** is random and is what actually protects the archive. Changing the
   passphrase or the recovery key rewraps the DEK; nothing else is
-  re-encrypted.
+  re-encrypted, so a passphrase change is a change of what opens the
+  archive, not of the key that encrypts it. Anyone who once held the DEK
+  can still read every blob they can get, old or new; there is no
+  operation that rotates the DEK and re-encrypts the archive under it.
 - **Recovery key** is 32 random bytes generated at setup and shown once as 24
   English words (BIP39 encoding, used only for its checksum and wordlist,
   never for seed derivation). It needs no Argon2id: a random 256-bit key
@@ -159,9 +166,12 @@ DEK, 32 random bytes, protects the whole archive
   log in and fetch the manifest. Losing both passphrase and recovery key
   loses the archive; there is no server-side reset by design.
 - **Auth keys** are 32 bytes sent as standard base64. The server stores only
-  their SHA-256 and compares in constant time; a slow hash would add nothing
-  on top of 256 bits of entropy. Login accepts either the passphrase or the
-  recovery auth key.
+  their SHA-256 and compares in constant time. A slow hash on the server
+  would add nothing: the recovery auth key derives from 256 random bits,
+  and the passphrase auth key carries only the passphrase's entropy, which
+  Argon2id already prices per guess, at the same price the wrapped DEK in
+  the manifest can be tested at offline. Login accepts either the
+  passphrase or the recovery auth key.
 - **Sealing** is XChaCha20-Poly1305. Wire format: one version byte `0x01`,
   a 24-byte random nonce, then ciphertext with the 16-byte tag. Blobs use
   their id as additional authenticated data so the server cannot serve one
@@ -195,6 +205,14 @@ The KDF parameters are also stored on the server, because unlock needs them
 before it can log in (see the API). The manifest copy keeps a backup
 self-describing.
 
+The server reads the `kdf` and `wrapped` fields, and only those: setup and
+rekey require them to be present, and a session-only `PUT /api/manifest`
+must carry them unchanged, so that a stolen cookie can replace the segment
+list but never the wrapped keys. Nothing else binds header to body; a
+manifest is not versioned beyond its ETag, so a server, a backup restore or
+a cookie holder with an older manifest can roll the archive back to it
+without the client noticing.
+
 ### Keys in the browser
 
 - While unlocked, the usable keys (DEK and its subkeys) exist only in memory
@@ -207,11 +225,22 @@ self-describing.
   unwraps the DEK without the passphrase. A stolen server holds a session key
   and no ciphertext; a stolen disk holds ciphertext and no session key. Lock,
   logout or session expiry deletes the server half, which turns the stored
-  ciphertext into random bytes.
+  ciphertext into random bytes. The split protects against either half
+  alone: a browser profile stolen whole, sealed DEK and a still-valid
+  session cookie together, opens the archive until the session ends.
 - The DEK itself is never placed in sessionStorage or IndexedDB: browsers
   persist both to disk.
 - Randomness comes only from `crypto.getRandomValues`. The app refuses to run
   without it and warns in an insecure context other than localhost.
+- Lock zeroes the keys in place, and work still in flight is not trusted
+  to notice: sealing under a key of all zeros is refused outright, and
+  every path that waits on the network or on decompression checks that
+  the session's keys are still the ones it started with before it stores,
+  publishes or caches what it got. A lock in one tab is announced on a
+  BroadcastChannel so the other tabs drop their keys at once rather than
+  at their next refused request, and a manifest poll the server refuses
+  locks the tab that made it. Lock waits at most ten seconds for a running
+  import to commit what it finished.
 - Idle auto-lock is a future setting: a timer that calls lock.
 
 ### Libraries
@@ -242,7 +271,10 @@ sizes to fixed buckets is a cheap future hardening.
    the message is skipped entirely and produces no new index record. A
    parsed message whose `Message-ID`, `Date` and `From` match a record is
    skipped too, which covers a provider re-export that altered transport
-   headers; all three must match because some clients reuse ids.
+   headers; all three must match because some clients reuse ids. This is
+   a judgement: a message that shares all three with one already archived
+   but differs in its body, a list copy with a footer say, is treated as
+   the same message and its copy is not kept.
 4. Encrypt and upload the raw and view blobs. A blob the server already has
    answers 409, which the client treats as stored; that is how an
    interrupted import resumes without a separate existence check.
@@ -283,13 +315,17 @@ against the server listing.
    so a reload on `/t/<key>` sends the server an opaque name rather than a
    Message-ID, and the same link works on every device.
    HTML bodies are sanitized at render (DOMPurify, links forced to a new tab
-   without referrer, image sources removed) and shown in a shadow root under
-   the page's CSP, which forbids inline scripts; nothing in a message can
-   make the browser fetch from a third party until the user presses "Load
-   images" for the thread in front of them, which keeps https and data
-   image sources and resolves `cid:` parts from the raw blob. The policy
-   allows https images for that one case. Attachments and
-   the original are extracted from the raw blob in the browser.
+   without referrer, image sources removed, `url()` and its relatives
+   stripped from style attributes and elements) and shown in a shadow root
+   under the page's CSP, which forbids inline scripts, painted within its
+   own box so that nothing in a message can pose as part of the app;
+   nothing in a message can make the browser fetch from a third party
+   until the user presses "Load images" for the thread in front of them,
+   which keeps https and data image sources, in `<img>` and in CSS alike,
+   and resolves `cid:` parts from the raw blob. The policy allows https
+   images for that one case. Attachments and the original are extracted
+   from the raw blob in the browser; an SVG attachment is downloaded rather
+   than opened, since as a blob document it would run on the app's origin.
 4. Search runs entirely in memory and sends nothing to the server. The
    query is one string: words, "phrases", -exclusions and the operators
    `from:`, `to:`, `subject:`, `has:attachment`, `is:sent`, `after:`
@@ -305,11 +341,14 @@ against the server listing.
    navigation keeps `q` in the browser, but a hard reload or a bookmark
    sends it to the server as part of the request line, unlike thread
    addresses, which are HMACs. The server logs paths only; a reverse
-   proxy in front must be told not to log query strings.
+   proxy in front must be told not to log query strings. The browser's
+   own history, bookmarks and whatever syncs them hold the query and the
+   thread subject, which is the page title, in plaintext.
 5. While unlocked, the manifest is re-read every minute and when the tab
    regains focus. A changed ETag means another device committed segments:
    the newer manifest is adopted (so the next commit here builds on it) and
-   the user is offered to load the segments it lists.
+   the user is offered to load the segments it lists. A check that crossed
+   a commit made here is discarded: whatever it fetched is older.
 6. Lock clears memory. The encrypted cache stays on disk and is useless
    without the passphrase.
 
@@ -345,11 +384,13 @@ instant.
   auth key, or the recovery auth key) so a hijacked session alone cannot
   rotate anything. One call matters: two separate requests could leave a
   state where one passphrase logs in and the other decrypts. With one, a
-  failure leaves the old passphrase fully working and the change is retried
-  under the new ETag. The only exception is a crash between the server's
-  two file renames, which leaves the new manifest under the old
-  credentials; the same retry repairs it. A successful rekey revokes every
-  other session.
+  refused call leaves the old passphrase fully working, and the server
+  journals the new credentials before it touches the manifest, so a crash
+  at any point resolves to one consistent state at the next start (see
+  the API). A successful rekey revokes every other session. A response
+  lost on the way back is the one gap: the change took, the screen says
+  it failed, and in a recovery the new phrase was never shown, so the
+  passphrase just chosen is the way in and Settings makes a new phrase.
 
 ## Server API
 
@@ -369,7 +410,8 @@ POST   /api/rekey                     JSON: current auth key, new credentials an
 PUT    /api/session/key               32 bytes kept in memory on the session
 GET    /api/session/key
 GET    /api/manifest                  returns ciphertext + ETag
-PUT    /api/manifest                  If-Match required once a manifest exists (428/412)
+PUT    /api/manifest                  If-Match required once a manifest exists (428/412);
+                                      kdf and wrapped must be unchanged (403 header_locked)
 HEAD   /api/blobs/<id>                existence check
 GET    /api/blobs/<id>
 PUT    /api/blobs/<id>                write-once; 409 if the id exists
@@ -381,10 +423,15 @@ GET    /api/blobs                     listing, for garbage collection
   web app shows the create-account screen. The first `POST /api/setup` wins,
   becomes the only account, and the route is refused forever after. There is
   no setup token: an empty archive belongs to whoever reaches it first, which
-  on a private network is the operator. The server writes the manifest first
-  and the credentials second; a manifest orphaned by a crash in between is
+  on a private network is the operator, and the binary listens on loopback
+  unless told otherwise. The server writes the manifest first and the
+  credentials second; a manifest orphaned by a crash in between is
   overwritten by the next setup, which is only reachable while there are no
-  credentials.
+  credentials. Setup, login and rekey run one at a time under a single
+  lock, and setup checks for credentials again inside it: a request that
+  entered while the archive was empty and dawdled over its body cannot
+  replace the manifest of a setup that completed meanwhile, and a login
+  cannot open a session on a credential that a rekey has just retired.
 - **ETags** are opaque strings the client passes back verbatim, quotes
   included, in `If-Match` on manifest writes and in the `if_match` field of
   rekey. Setup needs none: it creates the manifest. A rejected current
@@ -394,8 +441,14 @@ GET    /api/blobs                     listing, for garbage collection
   passphrase auth key, the SHA-256 of the recovery auth key, and the KDF
   parameters as an opaque JSON object, compacted and capped at 1 KiB, served
   verbatim. Login checks both hashes without short-circuiting. Rekey verifies
-  the presented current credential, writes the manifest under `If-Match`,
-  then replaces the file atomically. Rekey shares the login rate limit.
+  the presented current credential, stages the new credentials in a journal
+  (`auth.json.next`) bound to the ETag the new manifest will have, writes
+  the manifest under `If-Match`, then installs the journal as `auth.json`.
+  At startup a leftover journal is compared with the manifest on disk:
+  matching ETag means the manifest went in, so the credentials are
+  installed; anything else means it did not, so the journal is dropped.
+  Either way credentials and manifest agree. Rekey shares the login rate
+  limit.
 - **Session key.** Set by the client after unlock, stored only in memory on
   the session record, never on disk, and gone with logout or expiry. Setting
   it again replaces it.
@@ -409,13 +462,28 @@ GET    /api/blobs                     listing, for garbage collection
   stored server-side only as hashes, in memory, with a 24 h idle timeout and
   a 7 day absolute lifetime. A restart logs everyone out; a rekey logs every
   other session out.
-- **Abuse limits.** Login, setup and rekey share a per-address rate limit. Blob and
-  manifest bodies are capped. State-changing requests must carry a
-  same-origin `Sec-Fetch-Site` or a matching `Origin`.
+- **Abuse limits.** Login, setup and rekey share a per-address rate limit,
+  applied before the body is read; the limiter sweeps expired windows at
+  most once per window and forgets everything past 65536 addresses. Behind
+  a reverse proxy every client shares the proxy's address unless the proxy
+  is listed in `--trusted-proxies`, in which case the last address it
+  appended to `X-Forwarded-For` is the client. Blob and manifest bodies are
+  capped, and a body has two minutes to arrive, fifteen for a blob upload,
+  so a request left open cannot hold a connection for as long as it likes.
+  State-changing requests must carry a same-origin `Sec-Fetch-Site` or a
+  matching `Origin`. There is no storage quota: a session can fill the
+  disk, as the owner can.
 
 Storage is a directory on the NAS filesystem, one file per blob under
 `blobs/<id[:2]>/<id>`, written to a temp file, fsynced and hard-linked into
-place so a crash cannot leave a partial blob. A backup is a plain copy.
+place so a crash cannot leave a partial blob; a shard directory is synced
+into `blobs/` before its first blob lands. The serving process holds an
+advisory lock on `lock` in the data directory, where the filesystem
+supports one, so a second process over the same directory refuses to
+start. A backup is a plain copy, taken while the server is idle: a copy
+made during an import can hold a manifest naming blobs it did not copy,
+and one made during a rekey a manifest and credentials of different
+generations.
 
 ## Out of scope for v1
 

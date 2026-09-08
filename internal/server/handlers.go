@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -22,6 +23,7 @@ const (
 	codeUnauthorized    = "unauthorized"
 	codeWrongCredential = "wrong_credential" //nolint:gosec // an error code, not a secret
 	codeForbidden       = "forbidden"
+	codeHeaderLocked    = "header_locked"
 	codeNotFound        = "not_found"
 	codeNotSetup        = "not_setup"
 	codeAlreadySetup    = "already_setup"
@@ -87,6 +89,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, codeAlreadySetup)
 		return
 	}
+	// Unauthenticated route: share the login limiter and count every attempt,
+	// before any work is done on the body.
+	if !s.limiter.Allow(s.clientIP(r)) {
+		s.log.Warn("setup rate limited", "remote", s.clientIP(r))
+		writeError(w, http.StatusTooManyRequests, codeRateLimited)
+		return
+	}
 	var req struct {
 		AuthKey         string          `json:"auth_key"`
 		RecoveryAuthKey string          `json:"recovery_auth_key"`
@@ -110,27 +119,21 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeInvalidKDF)
 		return
 	}
-	if req.Manifest == "" {
-		writeError(w, http.StatusBadRequest, codeBadRequest)
-		return
-	}
-	manifest, err := base64.StdEncoding.DecodeString(req.Manifest)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, codeBadRequest)
-		return
-	}
-	if int64(len(manifest)) > s.cfg.MaxManifestBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge)
+	manifest, ok := s.decodeManifest(w, req.Manifest)
+	if !ok {
 		return
 	}
 
-	// Unauthenticated route: share the login limiter and count every attempt.
-	if !s.limiter.Allow(clientIP(r)) {
-		s.log.Warn("setup rate limited", "remote", clientIP(r))
-		writeError(w, http.StatusTooManyRequests, codeRateLimited)
+	// The check above only spared a set-up archive the body. This one
+	// counts: a request that entered while the archive was empty and dawdled
+	// over its body must not replace the manifest of a setup that completed
+	// meanwhile, and two setups must not interleave.
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	if s.creds.IsSetup() {
+		writeError(w, http.StatusConflict, codeAlreadySetup)
 		return
 	}
-
 	// A manifest may already exist: an earlier attempt that crashed after
 	// writing it but before the credentials left an orphan. This route is
 	// only reachable while there are no credentials, so that orphan belongs
@@ -149,9 +152,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	// The manifest is written. If the credentials do not follow, it is either
-	// the manifest of a concurrent setup that won the race and wrote after
-	// us, or an orphan the next setup overwrites; neither needs cleaning up.
+	// The manifest is written. If the credentials do not follow, it is an
+	// orphan the next setup overwrites; nothing needs cleaning up.
 	switch err := s.creds.Setup(key, recoveryKey, req.KDF); {
 	case err == nil:
 	case errors.Is(err, auth.ErrAlreadySetup):
@@ -162,7 +164,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, codeInternal)
 		return
 	}
-	s.log.Info("archive set up", "remote", clientIP(r))
+	s.log.Info("archive set up", "remote", s.clientIP(r))
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -174,8 +176,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Rate limit before doing any work, and count every attempt rather than
 	// only the failures, so guessing cannot be hidden behind valid logins.
-	if !s.limiter.Allow(clientIP(r)) {
-		s.log.Warn("login rate limited", "remote", clientIP(r))
+	if !s.limiter.Allow(s.clientIP(r)) {
+		s.log.Warn("login rate limited", "remote", s.clientIP(r))
 		writeError(w, http.StatusTooManyRequests, codeRateLimited)
 		return
 	}
@@ -186,8 +188,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, err := auth.DecodeAuthKey(req.AuthKey)
+	// Verifying and creating the session under the account lock keeps a
+	// rekey from slipping between the two: a session must never be opened
+	// on a credential that has just been retired.
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
 	if err != nil || !s.creds.Verify(key) {
-		s.log.Warn("login failed", "remote", clientIP(r))
+		s.log.Warn("login failed", "remote", s.clientIP(r))
 		writeError(w, http.StatusUnauthorized, codeUnauthorized)
 		return
 	}
@@ -204,10 +211,12 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // handleRekey replaces credentials and manifest in one call, so a passphrase
 // or recovery key change cannot leave one credential logging in while the
-// other decrypts. The manifest goes first under its If-Match, exactly as
-// PUT /api/manifest; then the credentials file is replaced; then every other
-// session is revoked, since a session opened with the old passphrase must
-// not survive it.
+// other decrypts. The new credentials are staged in a journal bound to the
+// ETag the new manifest will have; the manifest goes in under its If-Match,
+// exactly as PUT /api/manifest; then the journal is committed and every
+// other session revoked, since a session opened with the old passphrase must
+// not survive it. A crash anywhere in between is resolved at the next start
+// by comparing the journal with the manifest on disk, see auth.Rotation.
 //
 // The session alone is not proof enough: a hijacked cookie could otherwise
 // rotate both keys and lock the owner out. The caller must also present a
@@ -258,57 +267,129 @@ func (s *Server) handleRekey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	manifest, err := base64.StdEncoding.DecodeString(req.Manifest)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, codeBadRequest)
-		return
-	}
-	if int64(len(manifest)) > s.cfg.MaxManifestBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge)
+	manifest, ok := s.decodeManifest(w, req.Manifest)
+	if !ok {
 		return
 	}
 
 	// As in login, every attempt counts, not only the failures.
-	if !s.limiter.Allow(clientIP(r)) {
-		s.log.Warn("rekey rate limited", "remote", clientIP(r))
+	if !s.limiter.Allow(s.clientIP(r)) {
+		s.log.Warn("rekey rate limited", "remote", s.clientIP(r))
 		writeError(w, http.StatusTooManyRequests, codeRateLimited)
 		return
 	}
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
 	if !s.creds.Verify(current) {
-		s.log.Warn("rekey credential rejected", "remote", clientIP(r))
+		s.log.Warn("rekey credential rejected", "remote", s.clientIP(r))
 		writeError(w, http.StatusUnauthorized, codeWrongCredential)
 		return
 	}
 
+	newETag := store.ETag(manifest)
+	rotation, err := s.creds.Stage(key, recoveryKey, req.KDF, newETag)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	etag, err := s.store.PutManifest(r.Context(), manifest, strings.TrimSpace(req.IfMatch))
 	switch {
 	case err == nil:
 	case errors.Is(err, store.ErrIfMatchRequired):
+		s.discard(rotation)
 		writeError(w, http.StatusPreconditionRequired, codeIfMatchRequired)
 		return
 	case errors.Is(err, store.ErrManifestConflict):
+		s.discard(rotation)
 		writeError(w, http.StatusPreconditionFailed, codeConflict)
 		return
 	default:
+		// The write failed at an unknown point, so the manifest may or may
+		// not have been replaced. Settle it the way a restart would.
+		s.settle(r.Context(), rotation, newETag)
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.creds.Rotate(key, recoveryKey, req.KDF); err != nil {
-		// The manifest is already replaced but the credentials are not, so
-		// the old keys still log in. The client answers a 500 by retrying
-		// the rekey under the new ETag, which is idempotent. The same retry
-		// repairs the other way this state arises: a crash between the two
-		// renames.
-		s.log.Error("rekey: manifest replaced but credentials not rotated", "error", err)
-		writeError(w, http.StatusInternalServerError, codeInternal)
-		return
+	if err := rotation.Commit(); err != nil {
+		// The new credentials are in force and the journal makes them
+		// durable; only the credentials file is behind, until the next start.
+		s.log.Error("rekey: credentials rotated but not persisted", "error", err)
 	}
 	s.sessions.RevokeOthers(sessionToken(r))
-	s.log.Info("credentials rotated", "remote", clientIP(r))
+	s.log.Info("credentials rotated", "remote", s.clientIP(r))
 	w.Header().Set("ETag", etag)
 	writeJSON(w, http.StatusOK, struct {
 		ETag string `json:"etag"`
 	}{ETag: etag})
+}
+
+// discard drops a staged rotation whose manifest write was refused.
+func (s *Server) discard(rotation *auth.Rotation) {
+	if err := rotation.Discard(); err != nil {
+		s.log.Error("rekey: rotation journal not removed", "error", err)
+	}
+}
+
+// settle resolves a staged rotation after a manifest write that failed
+// without saying whether it took: commit if the manifest on disk is the
+// new one, discard if it is not, and leave the journal to the next start
+// when even that cannot be told.
+func (s *Server) settle(ctx context.Context, rotation *auth.Rotation, newETag string) {
+	_, etag, err := s.store.Manifest(ctx)
+	switch {
+	case err == nil && etag == newETag:
+		if err := rotation.Commit(); err != nil {
+			s.log.Error("rekey: credentials rotated but not persisted", "error", err)
+		}
+	case err == nil, errors.Is(err, store.ErrNotFound):
+		s.discard(rotation)
+	default:
+		s.log.Error("rekey: rotation left for the next start", "error", err)
+	}
+}
+
+// decodeManifest decodes the base64 manifest of a setup or rekey request and
+// checks that it is an envelope, answering the client itself otherwise.
+func (s *Server) decodeManifest(w http.ResponseWriter, encoded string) ([]byte, bool) {
+	if encoded == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return nil, false
+	}
+	manifest, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return nil, false
+	}
+	if int64(len(manifest)) > s.cfg.MaxManifestBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge)
+		return nil, false
+	}
+	if _, err := manifestHeader(manifest); err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return nil, false
+	}
+	return manifest, true
+}
+
+// manifestHeader returns the credential-bearing part of a manifest envelope,
+// its kdf and wrapped fields, in a canonical form two manifests can be
+// compared on: decoded and re-encoded, so that spacing and key order do
+// not count. The server reads nothing else of the manifest, and nothing here
+// it does not already know: the KDF parameters are the ones it serves and
+// the wrapped keys are ciphertext. A manifest that is not an envelope with
+// both fields as objects is refused.
+func manifestHeader(data []byte) ([]byte, error) {
+	var envelope struct {
+		KDF     map[string]any `json:"kdf"`
+		Wrapped map[string]any `json:"wrapped"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, errors.New("manifest is not an envelope")
+	}
+	if envelope.KDF == nil || envelope.Wrapped == nil {
+		return nil, errors.New("manifest lacks kdf or wrapped")
+	}
+	return json.Marshal([2]map[string]any{envelope.KDF, envelope.Wrapped})
 }
 
 // handlePutSessionKey stores the server half of the client's split session
@@ -380,9 +461,41 @@ func (s *Server) handleGetManifest(w http.ResponseWriter, r *http.Request) {
 
 // handlePutManifest replaces the manifest under an If-Match precondition, so
 // two devices cannot silently overwrite each other's segment list.
+//
+// A session is all this route asks for, so it must not be able to do what
+// rekey demands a credential for: the kdf and wrapped fields of the new
+// manifest must equal the stored ones, or a stolen cookie could replace the
+// wrapped keys with garbage and lose the archive. The comparison is made
+// against whatever manifest is current; if that changes before the write,
+// the If-Match fails and the client compares again on its retry.
 func (s *Server) handlePutManifest(w http.ResponseWriter, r *http.Request) {
 	data, ok := readBody(w, r, s.cfg.MaxManifestBytes)
 	if !ok {
+		return
+	}
+	header, err := manifestHeader(data)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest)
+		return
+	}
+	current, _, err := s.store.Manifest(r.Context())
+	switch {
+	case err == nil:
+		locked, err := manifestHeader(current)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		if !bytes.Equal(header, locked) {
+			s.log.Warn("manifest header change refused without a credential", "remote", s.clientIP(r))
+			writeError(w, http.StatusForbidden, codeHeaderLocked)
+			return
+		}
+	case errors.Is(err, store.ErrNotFound):
+		// Nothing to hold the header to; PutManifest decides whether a
+		// manifest may be created.
+	default:
+		s.fail(w, r, err)
 		return
 	}
 	ifMatch := strings.TrimSpace(r.Header.Get("If-Match"))

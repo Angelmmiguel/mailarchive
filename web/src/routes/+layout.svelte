@@ -13,7 +13,7 @@
 	import { page } from '$app/state';
 	import type { ResolvedPathname } from '$app/types';
 	import { resolve } from '$app/paths';
-	import { leave, lockArchive } from '$lib/app/lock';
+	import { followLocks, leave, lockArchive } from '$lib/app/lock';
 	import { archiveSearch } from '$lib/app/navigation';
 	import { cancelImport, startImport } from '$lib/import/start';
 	import type { ImportFile } from '$lib/import/sources';
@@ -58,6 +58,9 @@
 	});
 
 	const here = $derived(page.url.pathname + page.url.search);
+
+	// A lock in another tab is this one's too.
+	$effect(() => followLocks(() => here));
 
 	function importFiles(files: ImportFile[]): void {
 		void startImport(files, { onexpired: () => void leave(here, 'expired') });

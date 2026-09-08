@@ -51,11 +51,17 @@
 	const wantsInline = $derived(images && /cid:/i.test(message?.html ?? ''));
 
 	$effect(() => {
-		if (!wantsInline || inline !== null) return;
+		if (!wantsInline) return;
+		// Written, never read, here: reading it would make this effect its
+		// own trigger.
 		const urls = new SvelteMap<string, string>();
+		let live = true;
 		inline = urls;
 		void oninline().then(
 			(parts) => {
+				// The card may be gone by the time the parts arrive; a URL
+				// made now would have nobody to revoke it.
+				if (!live) return;
 				for (const [id, part] of parts) {
 					urls.set(
 						id,
@@ -66,7 +72,9 @@
 			(e: unknown) => (problem = e instanceof Error ? e.message : String(e))
 		);
 		return () => {
+			live = false;
 			for (const url of urls.values()) URL.revokeObjectURL(url);
+			inline = null;
 		};
 	});
 	let source = $state<string | null>(null);

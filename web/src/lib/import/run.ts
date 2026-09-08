@@ -129,6 +129,9 @@ export async function runImport(
 		importState.counts.parsed++;
 		// Cancelled while parsing: nothing of this message reaches the server.
 		if (signal.aborted) return;
+		// Locked while parsing: the keys are zeros now, and nothing seals under
+		// them.
+		if (session.keys !== keys) throw new LockedError();
 		const { message } = prepared;
 		const key = headerKey(message);
 		if (index.find({ id, ...message }) !== null || (key !== null && takenHeaders.has(key))) {
@@ -234,6 +237,9 @@ async function writeSegment(
 		shards: shardIds
 	};
 	await commitSegment(segment, { api });
+	// The commit checked the session after its write; the same holds here
+	// for the index, which a lock has emptied.
+	if (session.keys !== keys) throw new LockedError();
 	index.add(segment.id, records);
 	terms.add(segment.id, [...shards.values()]);
 	importState.writing = { done: importState.writing.total, total: importState.writing.total };

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ func newStore(t *testing.T) (*FS, string) {
 	if err != nil {
 		t.Fatalf("NewFS: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return s, dir
 }
 
@@ -347,19 +349,49 @@ func TestConcurrentPutManifestHasOneWinner(t *testing.T) {
 
 func TestNewFSCleansTempDir(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := NewFS(dir); err != nil {
+	first, err := NewFS(dir)
+	if err != nil {
 		t.Fatalf("NewFS: %v", err)
 	}
 	stale := filepath.Join(dir, "tmp", "w-stale")
 	if err := os.WriteFile(stale, []byte("partial"), 0o600); err != nil {
 		t.Fatalf("write stale temp: %v", err)
 	}
-	if _, err := NewFS(dir); err != nil {
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	second, err := NewFS(dir)
+	if err != nil {
 		t.Fatalf("NewFS again: %v", err)
 	}
+	defer func() { _ = second.Close() }()
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stale temp file survived: %v", err)
 	}
+}
+
+// Two stores over one directory would race on the manifest and sweep each
+// other's temp files; the second is refused until the first closes.
+func TestNewFSLocksDataDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock on this platform")
+	}
+	dir := t.TempDir()
+	first, err := NewFS(dir)
+	if err != nil {
+		t.Fatalf("NewFS: %v", err)
+	}
+	if _, err := NewFS(dir); !errors.Is(err, ErrLocked) {
+		t.Fatalf("second NewFS = %v, want ErrLocked", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	second, err := NewFS(dir)
+	if err != nil {
+		t.Fatalf("NewFS after Close: %v", err)
+	}
+	_ = second.Close()
 }
 
 func TestPutRespectsCancelledContext(t *testing.T) {
@@ -375,15 +407,16 @@ func TestPutRespectsCancelledContext(t *testing.T) {
 	}
 }
 
-// countFiles returns the number of regular files below dir.
+// countFiles returns the number of regular files below dir, the lock file
+// NewFS keeps open aside.
 func countFiles(t *testing.T, dir string) int {
 	t.Helper()
 	n := 0
-	err := filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() {
+		if !d.IsDir() && path != lockPath(dir) {
 			n++
 		}
 		return nil

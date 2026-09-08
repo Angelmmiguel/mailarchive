@@ -47,9 +47,14 @@ export function fileKind(name: string, type: string): string {
 	return /^[a-z0-9-]{1,5}$/i.test(subtype) ? subtype.toUpperCase() : 'FILE';
 }
 
-/** What the browser can show itself; everything else is downloaded. */
+/**
+ * What the browser can show itself; everything else is downloaded. SVG is
+ * left out on purpose: it is a document that can carry scripts, and a blob
+ * URL opens it on this app's origin.
+ */
 export function opensInTab(type: string): boolean {
 	const kind = type.split(';')[0].trim().toLowerCase();
+	if (kind === 'image/svg+xml') return false;
 	return kind.startsWith('image/') || kind === 'application/pdf' || kind === 'text/plain';
 }
 

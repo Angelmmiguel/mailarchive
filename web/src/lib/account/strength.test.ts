@@ -42,3 +42,24 @@ describe('passphraseStrength', () => {
 		expect(passphraseStrength('  spaced   words   here  ')).toMatchObject({ words: 3 });
 	});
 });
+
+describe('passphraseStrength and predictable strings', () => {
+	it('keeps a repeated pattern weak however long it gets', () => {
+		expect(passphraseStrength('a'.repeat(28))).toMatchObject({ level: 'weak', characters: 28 });
+		expect(passphraseStrength('abc'.repeat(10))).toMatchObject({ level: 'weak' });
+		expect(passphraseStrength('banana banana banana banana')).toMatchObject({
+			level: 'weak',
+			words: 4
+		});
+		expect(passphraseStrength('12345678901234567890123')).toMatchObject({ level: 'weak' });
+	});
+
+	it('keeps a passphrase of few distinct characters weak', () => {
+		expect(passphraseStrength('aaaa bbbb cccc dddd eeee')).toMatchObject({ level: 'weak' });
+	});
+
+	it('does not mistake a real passphrase for a pattern', () => {
+		expect(passphraseStrength('correct horse battery staple')).toMatchObject({ level: 'strong' });
+		expect(passphraseStrength('a nana band that plays')).toMatchObject({ level: 'strong' });
+	});
+});
