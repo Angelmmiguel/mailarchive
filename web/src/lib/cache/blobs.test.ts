@@ -19,6 +19,18 @@ function behaves(name: string, make: () => BlobCache): void {
 			expect(await cache.get('b')).toBeNull();
 		});
 
+		it('sizes as the bytes held', async () => {
+			const cache = make();
+			expect(await cache.size()).toBe(0);
+			await cache.put('a', bytes(1, 2, 3));
+			await cache.put('b', bytes(4));
+			expect(await cache.size()).toBe(4);
+			await cache.delete('a');
+			expect(await cache.size()).toBe(1);
+			await cache.clear();
+			expect(await cache.size()).toBe(0);
+		});
+
 		it('hands out copies', async () => {
 			const cache = make();
 			const original = bytes(9);
@@ -34,36 +46,6 @@ function behaves(name: string, make: () => BlobCache): void {
 
 behaves('IndexedDbCache', () => new IndexedDbCache(() => new IDBFactory()));
 behaves('MemoryCache', () => new MemoryCache());
-
-describe('size', () => {
-	it('is the bytes held by the memory cache', async () => {
-		const cache = new MemoryCache();
-		expect(await cache.size()).toBe(0);
-		await cache.put('a', bytes(1, 2, 3));
-		await cache.put('b', bytes(4));
-		expect(await cache.size()).toBe(4);
-		await cache.clear();
-		expect(await cache.size()).toBe(0);
-	});
-
-	it('is the storage estimate for IndexedDB, or null without one', async () => {
-		const measured = new IndexedDbCache(
-			() => new IDBFactory(),
-			() => Promise.resolve({ usage: 4096, quota: 1 << 30 })
-		);
-		expect(await measured.size()).toBe(4096);
-		const blind = new IndexedDbCache(
-			() => new IDBFactory(),
-			() => Promise.resolve(undefined)
-		);
-		expect(await blind.size()).toBeNull();
-		const failing = new IndexedDbCache(
-			() => new IDBFactory(),
-			() => Promise.reject(new Error('no'))
-		);
-		expect(await failing.size()).toBeNull();
-	});
-});
 
 describe('IndexedDbCache without IndexedDB', () => {
 	it('answers every call as a miss', async () => {

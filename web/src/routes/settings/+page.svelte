@@ -100,7 +100,7 @@
 			? 'measuring…'
 			: cached === null
 				? 'size unknown · index is re-downloaded on next unlock'
-				: `about ${fileSize(cached)} · index is re-downloaded on next unlock`
+				: `${fileSize(cached)} · index is re-downloaded on next unlock`
 	);
 
 	/**

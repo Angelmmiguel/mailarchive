@@ -59,7 +59,7 @@ test('Settings opens from the toolbar and shows the archive figures', async () =
 	await expect(tiles).toHaveText(['3', '2', /KB$/, '1']);
 	await expect(section('Own addresses').getByTestId('address')).toHaveText(['reader@example.org']);
 	await expect(
-		section('This device').getByText(/^about .* · index is re-downloaded/)
+		section('This device').getByText(/^[\d.]+ [KMG]?B · index is re-downloaded/)
 	).toBeVisible();
 });
 
@@ -168,7 +168,7 @@ test('clearing the cache makes the next unlock fetch the index again', async () 
 	});
 	await page.reload();
 	await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-	await expect(device.getByText(/^about .* · index is re-downloaded/)).toBeVisible();
+	await expect(device.getByText(/^[\d.]+ [KMG]?B · index is re-downloaded/)).toBeVisible();
 	expect(fetched.length).toBeGreaterThan(0);
 });
 

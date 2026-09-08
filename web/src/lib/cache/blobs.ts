@@ -18,7 +18,7 @@ export interface BlobCache {
 	put(id: string, bytes: Bytes): Promise<void>;
 	delete(id: string): Promise<void>;
 	clear(): Promise<void>;
-	/** Bytes held, roughly, or null when the store cannot say. */
+	/** Bytes held, or null when the store cannot say. */
 	size(): Promise<number | null>;
 }
 
@@ -26,13 +26,7 @@ export interface BlobCache {
 export class IndexedDbCache implements BlobCache {
 	private db: Promise<IDBDatabase | null> | null = null;
 
-	constructor(
-		private readonly factory: () => IDBFactory | undefined,
-		private readonly estimate: () => Promise<StorageEstimate | undefined> = () =>
-			typeof navigator === 'undefined' || navigator.storage === undefined
-				? Promise.resolve(undefined)
-				: navigator.storage.estimate()
-	) {}
+	constructor(private readonly factory: () => IDBFactory | undefined) {}
 
 	async get(id: string): Promise<Bytes | null> {
 		const found = await this.run('readonly', (store) => store.get(id));
@@ -52,14 +46,25 @@ export class IndexedDbCache implements BlobCache {
 	}
 
 	/**
-	 * The origin's storage estimate, which is this cache: summing the
-	 * entries would read every cached blob back just to measure them.
+	 * The entries summed, walking the store. The origin's storage estimate
+	 * would be cheaper, but it counts whatever else the host has stored,
+	 * every archive that ever lived on it included.
 	 */
 	async size(): Promise<number | null> {
-		if ((await this.open()) === null) return null;
+		const db = await this.open();
+		if (db === null) return null;
 		try {
-			const usage = (await this.estimate())?.usage;
-			return typeof usage === 'number' ? usage : null;
+			return await new Promise<number>((resolve, reject) => {
+				let total = 0;
+				const request = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+				request.onerror = () => reject(request.error);
+				request.onsuccess = () => {
+					const cursor = request.result;
+					if (cursor === null) return resolve(total);
+					if (cursor.value instanceof Uint8Array) total += cursor.value.byteLength;
+					cursor.continue();
+				};
+			});
 		} catch {
 			return null;
 		}
