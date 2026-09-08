@@ -21,7 +21,27 @@ export function labelsFor(
 	return labels;
 }
 
+/**
+ * Whether `address` is one of the user's own. An own address may hold `*`
+ * to stand for any run of characters, so `*@icloud.com` covers every alias
+ * a relay such as Hide My Email hands out; the comparison ignores case.
+ */
 export function isOwn(address: string, ownAddresses: string[]): boolean {
 	const wanted = address.toLowerCase();
-	return ownAddresses.some((own) => own.toLowerCase() === wanted);
+	return ownAddresses.some((own) => matcher(own.toLowerCase()).test(wanted));
+}
+
+const matchers = new Map<string, RegExp>();
+
+function matcher(own: string): RegExp {
+	let regexp = matchers.get(own);
+	if (regexp === undefined) {
+		const source = own
+			.split('*')
+			.map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+			.join('.*');
+		regexp = new RegExp(`^${source}$`);
+		matchers.set(own, regexp);
+	}
+	return regexp;
 }

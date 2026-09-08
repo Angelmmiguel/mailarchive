@@ -26,4 +26,16 @@ describe('isOwn', () => {
 		expect(isOwn('A@B.c', ['a@b.c'])).toBe(true);
 		expect(isOwn('a@b.c', [])).toBe(false);
 	});
+
+	it('lets * stand for any run of characters', () => {
+		expect(isOwn('Maple.Fox_42@icloud.com', ['*@icloud.com'])).toBe(true);
+		expect(isOwn('me@icloud.com.example.org', ['*@icloud.com'])).toBe(false);
+		expect(isOwn('me+work@example.org', ['me+*@example.org'])).toBe(true);
+		expect(isOwn('me@example.org', ['me+*@example.org'])).toBe(false);
+	});
+
+	it('takes the rest of the address literally', () => {
+		expect(isOwn('mexexample.org', ['me.x@example.org'])).toBe(false);
+		expect(isOwn('me@examplexorg', ['me@example.org'])).toBe(false);
+	});
 });

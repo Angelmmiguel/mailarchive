@@ -133,7 +133,15 @@ test('addresses are validated, deduplicated and removable', async () => {
 	await entry.press('Enter');
 	await entry.fill('m.okafor@acme.co');
 	await entry.press('Enter');
-	await expect(page.getByTestId('address')).toHaveText(['maren@okafor.io', 'm.okafor@acme.co']);
+	await entry.fill('*@icloud.com');
+	await entry.press('Enter');
+	await expect(page.getByTestId('address')).toHaveText([
+		'maren@okafor.io',
+		'm.okafor@acme.co',
+		'*@icloud.com'
+	]);
+
+	await page.getByRole('button', { name: 'Remove *@icloud.com' }).click();
 
 	await page.getByRole('button', { name: 'Remove m.okafor@acme.co' }).click();
 	await expect(page.getByTestId('address')).toHaveText(['maren@okafor.io']);

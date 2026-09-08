@@ -210,8 +210,8 @@
 			<div class="addresses">
 				<AddressList bind:this={list} bind:addresses disabled={working === 'addresses'} />
 				<p class="hint">
-					Mail from these addresses is labelled sent on the next import; lists show “to X” instead
-					of your own name.
+					Mail from these addresses is labelled sent and lists show “to X” instead of your own name.
+					A * stands for anything, so *@icloud.com covers every alias.
 				</p>
 				<div class="save">
 					<Button

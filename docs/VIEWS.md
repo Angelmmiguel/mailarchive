@@ -41,8 +41,9 @@ until the user confirms it is stored. Explains that losing both the
 passphrase and this key loses the archive. Moves to Own addresses.
 
 ### Own addresses `/setup/addresses`
-List of the user's email addresses, add and remove. Used to derive the `sent`
-label and to show "to X" instead of "from me" in lists. Can be skipped and
+List of the user's email addresses, add and remove; `*` stands for anything,
+as in `*@icloud.com`. Used to derive the `sent` label and to show "to X"
+instead of "from me" in lists. Can be skipped and
 completed later in Settings. Moves to Archive, which is empty and shows the
 import prompt.
 

@@ -6,6 +6,10 @@ describe('normalizeAddress', () => {
 		expect(normalizeAddress('  Maren@Okafor.IO ')).toBe('maren@okafor.io');
 	});
 
+	it('accepts a * pattern', () => {
+		expect(normalizeAddress('*@iCloud.com')).toBe('*@icloud.com');
+	});
+
 	it('rejects what is not an address', () => {
 		for (const bad of ['', 'maren', 'maren@', '@okafor.io', 'maren@okafor', 'a b@okafor.io']) {
 			expect(normalizeAddress(bad)).toBeNull();

@@ -117,7 +117,9 @@ server sees N opaque files of varying size per segment, nothing more.
 The `.eml` dump carries no folder structure, so labels are derived from the
 records, at grouping and search time rather than at import:
 
-- `sent` when the `From` address matches one of the configured own addresses
+- `sent` when the `From` address matches one of the configured own addresses;
+  an own address may hold `*` for any run of characters, so `*@icloud.com`
+  covers the aliases a relay such as Hide My Email hands out
 - `attachments` when the message has at least one non-inline part
 
 Own addresses live in the encrypted manifest settings, so adding one later

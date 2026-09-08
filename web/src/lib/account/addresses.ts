@@ -1,7 +1,8 @@
 /**
  * The user's own addresses, as typed in onboarding and Settings. They are
  * matched against message headers later, so they are stored lower-cased
- * and trimmed, and a list never holds the same address twice.
+ * and trimmed, and a list never holds the same address twice. An address
+ * may hold `*` to stand for any run of characters, such as `*@icloud.com`.
  */
 
 /** Something with one `@`, no whitespace and a dotted domain. */

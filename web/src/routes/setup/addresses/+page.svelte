@@ -43,7 +43,7 @@
 <Step step={3} title="Your addresses" width="wide">
 	{#snippet lead()}
 		Mail from these addresses is labelled <Code>sent</Code> and lists show “to X” instead of your own
-		name.
+		name. A <Code>*</Code> stands for anything, so <Code>*@icloud.com</Code> covers every alias.
 	{/snippet}
 	<AddressList bind:this={list} bind:addresses disabled={working} />
 	<div class="actions">
