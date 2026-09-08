@@ -88,10 +88,17 @@ the original dump at the cost of a larger download per attachment.
 ### Segment index
 
 One record per message, a few hundred bytes each: message id, date, from, to,
-cc, subject, snippet, thread id, labels, size, attachment list (name, type,
-size, part index), and pointers to the raw and view blobs. The manifest entry
-for a segment lists the ids of its term shards, since the server cannot relate
-a shard to its segment.
+cc, subject, snippet, thread id, size, attachment list (name, type, size, part
+index), and pointers to the raw and view blobs. The manifest entry for a
+segment lists the ids of its term shards, since the server cannot relate a
+shard to its segment.
+
+A record holds only what the message itself says. Segments are immutable and
+a re-import of the same message is skipped as a duplicate, so anything written
+into a record is frozen at import: a value that also depends on a setting
+would keep answering for the setting as it was that day, and the only way to
+correct it would be to rebuild the archive. Whatever follows from a setting,
+or from another message, is worked out from the records when they are read.
 
 ### Term shards
 
@@ -107,15 +114,19 @@ server sees N opaque files of varying size per segment, nothing more.
 
 ### Labels
 
-The `.eml` dump carries no folder structure, so labels are derived at import:
+The `.eml` dump carries no folder structure, so labels are derived from the
+records, at grouping and search time rather than at import:
 
 - `sent` when the `From` address matches one of the configured own addresses
 - `attachments` when the message has at least one non-inline part
-- thread grouping from `Message-ID`, `In-Reply-To` and `References`
 
-Own addresses live in the encrypted manifest settings. User-defined labels are
-a later addition and would live in a small mutable, encrypted "annotations"
-document rather than in the immutable segments.
+Own addresses live in the encrypted manifest settings, so adding one later
+(an alias, a forgotten work address) relabels every message the moment the
+setting is saved. Thread grouping from `Message-ID`, `In-Reply-To` and
+`References` is the one thing decided at import, since it depends on the
+messages known at the time. User-defined labels are a later addition and
+would live in a small mutable, encrypted "annotations" document rather than
+in the immutable segments.
 
 ## Cryptography
 

@@ -4,11 +4,13 @@
  * stores; the list views read from it grouped into threads. `records` is
  * `$state.raw` because a deep proxy over tens of thousands of records
  * would cost more than the reactivity is worth; replace the array to
- * notify.
+ * notify. Threads carry labels, and `sent` depends on the own addresses in
+ * the manifest, so the grouping follows the settings.
  */
 import type { ThreadMap } from '$lib/mail/thread';
 import { headerKey, type IndexRecord } from '$lib/index/records';
 import { groupThreads, type Thread } from '$lib/index/threads';
+import { session } from './session.svelte';
 
 export interface IndexProgress {
 	done: number;
@@ -26,7 +28,9 @@ class Index {
 	/** Size of every original message, which is roughly what the server stores. */
 	bytes = $derived(this.records.reduce((sum, r) => sum + r.size, 0));
 	/** Newest first. */
-	threads = $derived(groupThreads(this.records));
+	threads = $derived(
+		groupThreads(this.records, session.manifest?.body.settings.ownAddresses ?? [])
+	);
 	threadById = $derived(new Map(this.threads.map((t) => [t.id, t] as [string, Thread])));
 
 	private byId = new Map<string, IndexRecord>();

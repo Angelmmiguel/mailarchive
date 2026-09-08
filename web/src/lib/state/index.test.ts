@@ -13,7 +13,6 @@ function record(id: string, extra: Partial<IndexRecord> = {}): IndexRecord {
 		cc: [],
 		subject: '',
 		snippet: '',
-		labels: [],
 		size: 1,
 		attachments: [],
 		view: 'v',

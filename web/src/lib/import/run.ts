@@ -15,7 +15,6 @@ import { commitSegment } from '$lib/account/segments';
 import { ApiError } from '$lib/api/types';
 import { encodeSegmentIndex, encodeShard, groupShards } from '$lib/index/segment';
 import { headerKey, type IndexRecord } from '$lib/index/records';
-import { labelsFor } from '$lib/mail/labels';
 import { threadIdFor } from '$lib/mail/thread';
 import type { Term } from '$lib/mail/tokenize';
 import { index } from '$lib/state/index.svelte';
@@ -63,7 +62,6 @@ export async function runImport(
 	if (session.status !== 'unlocked' || keys === null || session.manifest === null) {
 		throw new LockedError();
 	}
-	const ownAddresses = session.manifest.body.settings.ownAddresses;
 	importState.begin(label, files.length);
 	signal.addEventListener('abort', () => parser.close(), { once: true });
 	const ticker = setInterval(() => (importState.now = Date.now()), 1000);
@@ -161,7 +159,6 @@ export async function runImport(
 			cc: message.cc,
 			subject: message.subject,
 			snippet: prepared.snippet,
-			labels: labelsFor(message, ownAddresses),
 			size,
 			attachments: message.attachments,
 			view: view.id

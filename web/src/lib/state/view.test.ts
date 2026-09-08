@@ -21,7 +21,6 @@ function record(id: string, extra: Partial<IndexRecord> = {}): IndexRecord {
 		cc: [],
 		subject: id,
 		snippet: '',
-		labels: [],
 		size: 1,
 		attachments: [],
 		view: 'v',
@@ -47,7 +46,7 @@ beforeEach(() => {
 describe('listing', () => {
 	it('follows the index, the query, the order and the shards', () => {
 		index.add('s1', [
-			record('a', { labels: ['sent'] }),
+			record('a', { from: { name: '', address: 'me@example.com' } }),
 			record('b', { date: '2026-09-01T00:00:00Z' })
 		]);
 
@@ -63,6 +62,16 @@ describe('listing', () => {
 		terms.add('s1', [{ version: INDEX_VERSION, prefix: 'b', terms: { budget: [['b', 4, 1]] } }]);
 		expect(view.listing.map((t) => t.id)).toEqual(['b@x']);
 		expect(view.years).toEqual([2026]);
+	});
+
+	it('labels sent mail by the own addresses as they stand, not as imported', () => {
+		index.add('s1', [record('a', { from: { name: '', address: 'me@example.com' } }), record('b')]);
+		view.query = 'is:sent';
+		expect(view.listing.map((t) => t.id)).toEqual(['a@x']);
+
+		session.manifest!.body.settings.ownAddresses = ['a@x'];
+		expect(view.listing.map((t) => t.id)).toEqual(['b@x']);
+		expect(view.listing[0].labels).toEqual(['sent']);
 	});
 });
 

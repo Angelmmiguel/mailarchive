@@ -1,7 +1,10 @@
 /**
- * Labels derived at import, since an .eml dump carries no folders: `sent`
- * when the sender is one of the user's own addresses, `attachments` when
- * a part is offered as a file rather than embedded in the HTML.
+ * Labels, since an .eml dump carries no folders: `sent` when the sender is
+ * one of the user's own addresses, `attachments` when a part is offered as
+ * a file rather than embedded in the HTML. They are worked out from the
+ * record whenever they are shown or searched, never stored: the own
+ * addresses are a setting, and a label in the immutable index would keep
+ * answering for the setting as it was when the message was imported.
  */
 import type { ParsedMessage } from './message';
 

@@ -18,7 +18,6 @@ function record(over: Partial<IndexRecord> & { id: string }): IndexRecord {
 		cc: [],
 		subject: '',
 		snippet: '',
-		labels: [],
 		size: 1,
 		attachments: [],
 		view: 'v',
@@ -31,7 +30,9 @@ const records = [
 		id: 'invoice',
 		subject: 'Invoice #4471 overdue',
 		snippet: 'Second reminder, payment terms were net 30.',
-		labels: ['attachments'],
+		attachments: [
+			{ name: 'invoice.pdf', type: 'application/pdf', size: 1, inline: false, index: 0 }
+		],
 		date: '2026-09-03T10:00:00Z'
 	}),
 	record({
@@ -48,7 +49,9 @@ const records = [
 		snippet: 'Signed. Sending to you both.',
 		from: { name: '', address: 'me@example.org' },
 		to: [{ name: 'Legal', address: 'legal@acme.co' }],
-		labels: ['sent', 'attachments'],
+		attachments: [
+			{ name: 'signed.pdf', type: 'application/pdf', size: 1, inline: false, index: 0 }
+		],
 		date: '2026-09-02T12:00:00Z'
 	}),
 	record({
@@ -57,12 +60,11 @@ const records = [
 		snippet: 'Updated the runway slide.',
 		from: { name: '', address: 'me@example.org' },
 		to: [{ name: 'D. Reyes', address: 'd.reyes@acme.co' }],
-		labels: ['sent'],
 		date: '2026-08-01T10:00:00Z'
 	}),
 	record({ id: 'undated', subject: 'Photos', date: null })
 ];
-const threads = groupThreads(records);
+const threads = groupThreads(records, OWN);
 
 function terms(): TermIndex {
 	const index = new TermIndex();

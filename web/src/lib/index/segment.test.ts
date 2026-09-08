@@ -26,7 +26,6 @@ const record: IndexRecord = {
 	cc: [],
 	subject: 'Hello',
 	snippet: 'Hello there',
-	labels: [],
 	size: 10,
 	attachments: [],
 	view: 'b'.repeat(64)

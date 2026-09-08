@@ -33,7 +33,6 @@ function record(id: string): IndexRecord {
 		cc: [],
 		subject: id,
 		snippet: '',
-		labels: [],
 		size: 1,
 		attachments: [],
 		view: 'v'

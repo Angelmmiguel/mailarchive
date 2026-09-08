@@ -20,7 +20,6 @@ export interface IndexRecord {
 	cc: Address[];
 	subject: string;
 	snippet: string;
-	labels: string[];
 	/** Size of the original .eml in bytes. */
 	size: number;
 	attachments: AttachmentMeta[];

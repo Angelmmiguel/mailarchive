@@ -7,7 +7,7 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { ATTACHMENTS, isOwn, SENT } from '$lib/mail/labels';
+import { ATTACHMENTS, isOwn, labelsFor, SENT } from '$lib/mail/labels';
 import type { Address } from '$lib/mail/message';
 import type { IndexRecord } from './records';
 
@@ -26,7 +26,8 @@ export interface Thread {
 
 export const NO_SUBJECT = '(no subject)';
 
-export function groupThreads(records: IndexRecord[]): Thread[] {
+/** `own` are the user's addresses, which decide the `sent` label. */
+export function groupThreads(records: IndexRecord[], own: string[]): Thread[] {
 	const groups = new Map<string, IndexRecord[]>();
 	for (const record of records) {
 		const group = groups.get(record.threadId);
@@ -38,9 +39,9 @@ export function groupThreads(records: IndexRecord[]): Thread[] {
 		messages.sort(byDate);
 		const dated = messages.filter((m) => m.date !== null);
 		const latest = dated[dated.length - 1] ?? messages[messages.length - 1];
-		const labels: string[] = [];
-		if (messages.some((m) => m.labels.includes(SENT))) labels.push(SENT);
-		if (messages.some((m) => m.labels.includes(ATTACHMENTS))) labels.push(ATTACHMENTS);
+		const labels = [SENT, ATTACHMENTS].filter((label) =>
+			messages.some((m) => labelsFor(m, own).includes(label))
+		);
 		threads.push({
 			id,
 			subject: latest.subject || messages.find((m) => m.subject !== '')?.subject || NO_SUBJECT,

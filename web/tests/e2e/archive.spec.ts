@@ -60,7 +60,8 @@ test('the list shows threads newest first with who, what, when and how many', as
 	await expect(report).toContainText('me, Wallbox');
 	await expect(report).toContainText('Your charging summary report is ready');
 	await expect(report).toContainText('sent');
-	await expect(report).toContainText('⎘ · 2');
+	await expect(report.getByLabel('1 attachment')).toBeVisible();
+	await expect(report.getByLabel('2 messages')).toContainText('2');
 	await expect(report).toContainText('02 SEP');
 });
 

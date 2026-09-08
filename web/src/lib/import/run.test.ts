@@ -87,8 +87,6 @@ describe('runImport', () => {
 		const reply = records.find((r) => r.messageId === 'reply-1@example.org')!;
 		const report = records.find((r) => r.subject === 'Your charging summary report is ready')!;
 		expect(reply.threadId).toBe(report.threadId);
-		expect(reply.labels).toEqual(['sent']);
-		expect(report.labels).toEqual(['attachments']);
 		expect(report.attachments.map((a) => a.name)).toEqual([
 			'logo.png',
 			'charging-summary-august.pdf'

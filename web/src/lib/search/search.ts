@@ -12,7 +12,7 @@
 import { byDate, type Thread } from '$lib/index/threads';
 import type { IndexRecord } from '$lib/index/records';
 import type { TermIndex } from '$lib/index/terms';
-import { ATTACHMENTS, isOwn, SENT } from '$lib/mail/labels';
+import { ATTACHMENTS, isOwn, labelsFor, SENT } from '$lib/mail/labels';
 import type { Address } from '$lib/mail/message';
 import { FIELD_BODY, FIELD_NAMES, FIELD_SUBJECT, tokenize } from '$lib/mail/tokenize';
 import { hasWords, type Query } from './query';
@@ -117,8 +117,8 @@ export function search(
 ): Searched[] {
 	type Condition = (record: IndexRecord, meta: Meta) => number;
 	const conditions: Condition[] = [];
-	if (query.sent) conditions.push((r) => (r.labels.includes(SENT) ? 1 : 0));
-	if (query.attachments) conditions.push((r) => (r.labels.includes(ATTACHMENTS) ? 1 : 0));
+	if (query.sent) conditions.push((r) => (labelsFor(r, own).includes(SENT) ? 1 : 0));
+	if (query.attachments) conditions.push((r) => (labelsFor(r, own).includes(ATTACHMENTS) ? 1 : 0));
 	if (query.after !== null || query.before !== null) {
 		const after = query.after?.at ?? -Infinity;
 		const before = query.before?.at ?? Infinity;

@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
 	import type { ResolvedPathname } from '$app/types';
-	import { shortDate } from '$lib/app/format';
+	import { count, shortDate } from '$lib/app/format';
 	import type { Thread } from '$lib/index/threads';
 	import { SENT } from '$lib/mail/labels';
 
@@ -17,13 +17,6 @@
 	}
 
 	let { thread, participants, href, selected = false }: Props = $props();
-
-	const meta = $derived.by(() => {
-		const parts: string[] = [];
-		if (thread.attachments > 0) parts.push(`⎘${thread.attachments > 1 ? thread.attachments : ''}`);
-		if (thread.messages.length > 1) parts.push(String(thread.messages.length));
-		return parts.join(' · ');
-	});
 </script>
 
 <a class="row" class:selected {href} aria-current={selected ? 'page' : undefined}>
@@ -38,7 +31,28 @@
 	</span>
 	<span class="when">
 		<span>{shortDate(thread.latest.date)}</span>
-		{#if meta !== ''}<span>{meta}</span>{/if}
+		{#if thread.attachments > 0 || thread.messages.length > 1}
+			<span class="meta">
+				{#if thread.attachments > 0}
+					<span class="pill" aria-label={count(thread.attachments, 'attachment')}>
+						<svg viewBox="0 0 12 12" aria-hidden="true">
+							<path
+								d="M8.6 3.2v5.1a2.6 2.6 0 0 1-5.2 0V2.9a1.5 1.5 0 0 1 3 0v5.3a.8.8 0 0 1-1.6 0V3.6"
+							/>
+						</svg>
+						{#if thread.attachments > 1}{thread.attachments}{/if}
+					</span>
+				{/if}
+				{#if thread.messages.length > 1}
+					<span class="pill" aria-label={count(thread.messages.length, 'message')}>
+						<svg viewBox="0 0 12 12" aria-hidden="true">
+							<path d="M1.5 2.5h9M1.5 6h9M1.5 9.5h9" />
+						</svg>
+						{thread.messages.length}
+					</span>
+				{/if}
+			</span>
+		{/if}
 	</span>
 </a>
 
@@ -113,6 +127,36 @@
 	.snippet {
 		font: var(--body-sm) var(--font-body);
 		color: var(--text-muted);
+	}
+
+	.meta {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		height: 18px;
+		padding: 0 6px;
+		border-radius: var(--radius-sm);
+		background: var(--surface-inset);
+		color: var(--text-muted);
+	}
+
+	.pill svg {
+		width: 10px;
+		height: 10px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.4;
+		stroke-linecap: round;
+	}
+
+	.selected .pill {
+		background: var(--surface-page);
 	}
 
 	.when {
