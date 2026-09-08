@@ -39,7 +39,7 @@ build: web-build
 # Dockerfile builds the web app and the binary itself, so nothing here
 # depends on a prior `just build`.
 image version="latest":
-    docker build --platform linux/amd64 -t angelrb/mailarchive:{{version}} -t angelrb/mailarchive:latest .
+    docker build --platform linux/amd64 -t ghcr.io/angelmmiguel/mailarchive:{{version}} -t ghcr.io/angelmmiguel/mailarchive:latest .
 
 # Report files that gofmt would change.
 fmt:
