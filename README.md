@@ -65,12 +65,13 @@ GitHub Actions runs the same commands on every push and pull request
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)): the Go suite with the
 race detector, the web checks and unit tests, and `just web-e2e` for the
 account flows and the Playwright specs. Each job works inside `nix develop`,
-so CI uses the toolchain and the browsers that `flake.lock` pins.
+so CI uses the toolchain and the browsers that `flake.lock` pins. A push to
+`main` or a `v*` tag publishes the container image once all three suites pass.
 
 ## Deployment
 
 The image is [`ghcr.io/angelmmiguel/mailarchive`](https://github.com/Angelmmiguel/mailarchive/pkgs/container/mailarchive),
-published by [.github/workflows/image.yml](.github/workflows/image.yml): every
+published by the CI workflow once the suites pass on that commit: every
 push to `main` updates `latest`, and a `v*` tag adds the version tags.
 `just image` builds the same image locally. It runs the binary from scratch
 as `nobody:users` (99:100) with the archive at `/data` and the app on port

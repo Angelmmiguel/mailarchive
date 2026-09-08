@@ -1,18 +1,21 @@
 # Continuous integration. Every job runs the same commands a developer runs
 # locally, inside the flake's shell, so CI and `just` never drift: the Go
 # toolchain, Node, pnpm and the Playwright browsers all come from flake.lock.
+# The image is published only after all three suites pass on that commit.
 name: CI
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
-# A new push to a branch makes the previous run obsolete.
+# A new push to a branch makes the previous run obsolete, but a run that may
+# publish is left to finish.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -125,3 +128,53 @@ jobs:
             web/test-results
           retention-days: 7
           if-no-files-found: ignore
+
+  publish:
+    name: Publish image
+    # Only after the whole suite is green on this commit, and only for a push:
+    # a pull request must not publish, and a manual run on a branch other than
+    # main would produce no tag to push. Re-run this workflow to publish again.
+    needs: [backend, web, e2e]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # main publishes `latest`; a v* tag publishes the semver tags and moves
+      # `latest` to the release. The package name must be lower case, which
+      # the owner's login is not.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/angelmmiguel/mailarchive
+          flavor: latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      # linux/amd64 only, the platform Unraid runs, as `just image` builds.
+      # Provenance is off so the package holds one image per tag rather than
+      # an index with an attestation beside it.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
