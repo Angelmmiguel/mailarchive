@@ -79,6 +79,7 @@
 <div class="shell">
 	{#if unlocked}
 		<Toolbar
+			home={resolve('/')}
 			onlock={() => lockArchive(here)}
 			onimport={() => (importState.panelOpen = !importState.panelOpen)}
 			onsettings={() => {

@@ -55,6 +55,11 @@ test('Settings opens from the toolbar and shows the archive figures', async () =
 		'page'
 	);
 
+	await page.getByRole('link', { name: 'ARCHIVE' }).click();
+	await expect(page).toHaveURL(/\/$/);
+	await toolbar().getByRole('button', { name: 'Settings' }).click();
+	await expect(page).toHaveURL(/\/settings$/);
+
 	const tiles = section('Archive').locator('dd');
 	await expect(tiles).toHaveText(['3', '2', /KB$/, '1']);
 	await expect(section('Own addresses').getByTestId('address')).toHaveText(['reader@example.org']);

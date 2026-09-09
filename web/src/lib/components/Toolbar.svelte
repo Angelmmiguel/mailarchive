@@ -1,14 +1,17 @@
 <!--
-  The bar above every view after unlock: the wordmark, the search entry and
-  the actions. Import shows the running import's percent and reopens its
+  The bar above every view after unlock: the wordmark, which is the way
+  back to the archive from any screen, the search entry and the actions. Import shows the running import's percent and reopens its
   panel; Settings is marked as current while its screen is open; Lock
   reports through `busy` while the server is told.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { ResolvedPathname } from '$app/types';
 	import Button from './Button.svelte';
 
 	interface Props {
+		/** Where the wordmark leads: the archive. */
+		home: ResolvedPathname;
 		search?: Snippet;
 		/** Percent of a running import, or null. */
 		importing?: number | null;
@@ -20,6 +23,7 @@
 	}
 
 	let {
+		home,
 		search,
 		importing = null,
 		onimport,
@@ -40,7 +44,7 @@
 </script>
 
 <header class="toolbar">
-	<span class="brand">ARCHIVE</span>
+	<a class="brand" href={home}>ARCHIVE</a>
 	{#if search}<div class="search">{@render search()}</div>{/if}
 	<nav class="actions" aria-label="Archive">
 		{#if importing !== null}
@@ -81,6 +85,18 @@
 		width: 120px;
 		font: 500 var(--mono-md) / 1 var(--font-mono);
 		letter-spacing: var(--mono-tracking);
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.brand:hover {
+		color: var(--accent);
+	}
+
+	.brand:focus-visible {
+		outline: 0;
+		box-shadow: var(--focus-ring);
+		border-radius: var(--radius-sm);
 	}
 
 	.search {
