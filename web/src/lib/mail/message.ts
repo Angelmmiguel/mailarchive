@@ -27,7 +27,11 @@ export interface ParsedMessage {
 	messageId: string | null;
 	inReplyTo: string | null;
 	references: string[];
-	/** ISO 8601, or null when the Date header is missing or unreadable. */
+	/**
+	 * ISO 8601. Without a readable Date header, the time of the newest
+	 * Received hop, which is when the message reached the mailbox; null
+	 * when there is neither.
+	 */
 	date: string | null;
 	from: Address | null;
 	to: Address[];
@@ -77,7 +81,7 @@ export async function parseMessage(bytes: Uint8Array): Promise<ParsedMessage> {
 			.split(/\s+/)
 			.map((id) => stripId(id))
 			.filter((id): id is string => id !== null),
-		date: isoDate(email.date),
+		date: isoDate(email.date) ?? receivedDate(email.headers),
 		from,
 		to: mailboxes(email.to ?? []),
 		cc: mailboxes(email.cc ?? []),
@@ -110,6 +114,22 @@ function isoDate(value: string | undefined): string | null {
 	if (value === undefined) return null;
 	const time = Date.parse(value);
 	return Number.isNaN(time) ? null : new Date(time).toISOString();
+}
+
+/**
+ * The date of the first Received header that has one. Each hop prepends
+ * its own line, so the first is the last server the message passed, and
+ * its timestamp follows the final semicolon.
+ */
+function receivedDate(headers: { key: string; value: string }[]): string | null {
+	for (const header of headers) {
+		if (header.key !== 'received') continue;
+		const at = header.value.lastIndexOf(';');
+		if (at === -1) continue;
+		const date = isoDate(header.value.slice(at + 1).trim());
+		if (date !== null) return date;
+	}
+	return null;
 }
 
 /** Flattens groups and drops entries without an address. */

@@ -1,0 +1,15 @@
+Received: from relay.example.test ([192.0.2.10])
+        by mx.example.org
+        with SMTP id KU6O1ZDG
+        for reader@example.org;
+        Thu, 30 Sep 2021 10:19:12 +0200 (CEST)
+Received: from alerts.example.test (alerts.example.test [192.0.2.20])
+    by relay.example.test (Postfix) with ESMTPS id 1E3BC1060162
+    for <reader@example.org>; Thu, 30 Sep 2021 08:19:11 +0000 (UTC)
+To: reader@example.org
+From: alerts-donotreply@example.test
+Subject: Sell order settled
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Proceeds from your recent sell order have been sent.

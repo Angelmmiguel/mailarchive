@@ -55,6 +55,13 @@ describe('parseMessage', () => {
 		expect(m.date).toBe('2026-09-02T07:05:00.000Z');
 	});
 
+	it('takes the time from the newest Received hop when there is no Date', async () => {
+		const m = await parseMessage(await fixture('undated.eml'));
+
+		expect(m.date).toBe('2021-09-30T08:19:12.000Z');
+		expect(m.subject).toBe('Sell order settled');
+	});
+
 	it('rejects bytes that are not a message', async () => {
 		await expect(parseMessage(new Uint8Array())).rejects.toThrow(MessageParseError);
 		await expect(parseMessage(await fixture('no-headers.eml'))).rejects.toThrow(MessageParseError);
