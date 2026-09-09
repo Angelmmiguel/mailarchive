@@ -124,9 +124,12 @@ records, at grouping and search time rather than at import:
 
 Own addresses live in the encrypted manifest settings, so adding one later
 (an alias, a forgotten work address) relabels every message the moment the
-setting is saved. Thread grouping from `Message-ID`, `In-Reply-To` and
-`References` is the one thing decided at import, since it depends on the
-messages known at the time. User-defined labels are a later addition and
+setting is saved. Thread grouping is the one thing decided at import, since
+it depends on the messages known at the time: by `Message-ID`, `In-Reply-To`
+and `References`, and, for a message whose ancestors are all unknown (a sent
+folder exported without those headers), by subject stripped of reply
+prefixes, shared correspondent and a ninety-day window; a message that is
+not itself a reply joins only a thread that already holds one. User-defined labels are a later addition and
 would live in a small mutable, encrypted "annotations" document rather than
 in the immutable segments.
 

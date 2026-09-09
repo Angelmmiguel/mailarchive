@@ -15,7 +15,7 @@ import { commitSegment } from '$lib/account/segments';
 import { ApiError } from '$lib/api/types';
 import { encodeSegmentIndex, encodeShard, groupShards } from '$lib/index/segment';
 import { headerKey, type IndexRecord } from '$lib/index/records';
-import { threadIdFor } from '$lib/mail/thread';
+import { Threader } from '$lib/mail/thread';
 import type { Term } from '$lib/mail/tokenize';
 import { index } from '$lib/state/index.svelte';
 import { importState } from '$lib/state/import.svelte';
@@ -72,7 +72,7 @@ export async function runImport(
 	// one folder do not both get uploaded before either reaches the index.
 	const taken = new Set<string>();
 	const takenHeaders = new Set<string>();
-	const threads = new Map(index.threadMap());
+	const threads = new Threader(session.manifest.body.settings.ownAddresses, index.records);
 	let next = 0;
 	let error: unknown = null;
 	// Segments are written one after another, even though pipelines keep
@@ -111,7 +111,7 @@ export async function runImport(
 		const size = bytes.length;
 		const id = blobId(keys.id, bytes);
 		if (index.find({ id, messageId: null, date: null, from: null }) !== null || taken.has(id)) {
-			importState.counts.duplicates++;
+			importState.duplicate(path, 'same bytes');
 			return;
 		}
 		taken.add(id);
@@ -133,7 +133,7 @@ export async function runImport(
 		const { message } = prepared;
 		const key = headerKey(message);
 		if (index.find({ id, ...message }) !== null || (key !== null && takenHeaders.has(key))) {
-			importState.counts.duplicates++;
+			importState.duplicate(path, 'same headers');
 			return;
 		}
 		if (key !== null) takenHeaders.add(key);
@@ -152,7 +152,7 @@ export async function runImport(
 		const record: IndexRecord = {
 			id,
 			messageId: message.messageId,
-			threadId: threadIdFor(message, threads, id),
+			threadId: threads.assign(message, id),
 			date: message.date,
 			from: message.from,
 			to: message.to,
@@ -163,9 +163,6 @@ export async function runImport(
 			attachments: message.attachments,
 			view: view.id
 		};
-		if (message.messageId !== null && !threads.has(message.messageId)) {
-			threads.set(message.messageId, record.threadId);
-		}
 		batch.records.push(record);
 		batch.terms.push({ id, terms: prepared.terms });
 		importState.counts.uploaded++;

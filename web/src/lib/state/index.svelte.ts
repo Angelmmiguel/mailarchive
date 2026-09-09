@@ -7,7 +7,6 @@
  * notify. Threads carry labels, and `sent` depends on the own addresses in
  * the manifest, so the grouping follows the settings.
  */
-import type { ThreadMap } from '$lib/mail/thread';
 import { headerKey, type IndexRecord } from '$lib/index/records';
 import { groupThreads, type Thread } from '$lib/index/threads';
 import { session } from './session.svelte';
@@ -35,7 +34,6 @@ class Index {
 
 	private byId = new Map<string, IndexRecord>();
 	private byHeader = new Map<string, IndexRecord>();
-	private threadMapping: ThreadMap = new Map();
 
 	/** The record with this raw id, or the record a re-export of it would duplicate. */
 	find(record: {
@@ -50,11 +48,6 @@ class Index {
 		return key === null ? null : (this.byHeader.get(key) ?? null);
 	}
 
-	/** Message-ID header → thread id, for threading new messages. */
-	threadMap(): ThreadMap {
-		return this.threadMapping;
-	}
-
 	/** Adds the records of one segment. Records already present are skipped. */
 	add(segmentId: string, records: IndexRecord[]): void {
 		const fresh: IndexRecord[] = [];
@@ -63,9 +56,6 @@ class Index {
 			this.byId.set(record.id, record);
 			const key = headerKey(record);
 			if (key !== null && !this.byHeader.has(key)) this.byHeader.set(key, record);
-			if (record.messageId !== null && !this.threadMapping.has(record.messageId)) {
-				this.threadMapping.set(record.messageId, record.threadId);
-			}
 			fresh.push(record);
 		}
 		this.records = [...this.records, ...fresh];
@@ -78,7 +68,6 @@ class Index {
 		this.loading = null;
 		this.byId.clear();
 		this.byHeader.clear();
-		this.threadMapping.clear();
 	}
 }
 

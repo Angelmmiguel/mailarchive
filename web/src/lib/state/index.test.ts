@@ -52,14 +52,6 @@ describe('find', () => {
 	});
 });
 
-describe('threadMap', () => {
-	it('maps Message-ID headers to threads', () => {
-		index.add('s1', [record('a', { threadId: 'root@x' })]);
-
-		expect(index.threadMap().get('a@x')).toBe('root@x');
-	});
-});
-
 describe('threads', () => {
 	it('groups the records and finds a thread by id', () => {
 		index.add('s1', [record('a', { threadId: 'root@x' }), record('b', { threadId: 'root@x' })]);
