@@ -121,8 +121,9 @@ failure (the run stops, what finished is kept, the panel says why).
 Sections: own addresses (same editor as onboarding, saved when changed),
 change passphrase (asks for the current one), regenerate recovery key
 (asks for the current passphrase, shows Recovery key again), archive
-statistics (messages, threads, storage, segments), the theme for this device
-(system or one of the looks), clear this device's cache, and Lock.
+statistics (messages, threads, storage, segments), export as .eml files into a
+folder (browsers with folder access only), the theme for this device (system
+or one of the looks), clear this device's cache, and Lock.
 
 ## Shell
 

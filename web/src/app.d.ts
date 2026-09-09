@@ -8,6 +8,17 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+
+	interface Window {
+		/**
+		 * The File System Access API's folder picker, which the DOM typings
+		 * leave out because only Chromium browsers have it. Settings checks
+		 * for it before offering the export.
+		 */
+		showDirectoryPicker(options?: {
+			mode?: 'read' | 'readwrite';
+		}): Promise<FileSystemDirectoryHandle>;
+	}
 }
 
 export {};

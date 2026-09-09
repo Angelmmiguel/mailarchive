@@ -1,10 +1,11 @@
 /**
  * Settings, on a server this file sets up for itself and fills with the
  * synthetic fixtures: the figures, the addresses, the passphrase change
- * and the unlock with the new one, the recovery key, the cache, Lock and
- * the session that expires under a change. Steps build on each other and
+ * and the unlock with the new one, the recovery key, the export, the cache,
+ * Lock and the session that expires under a change. Steps build on each other and
  * run in file order.
  */
+import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { startServer, type Server } from '../server';
 
@@ -92,6 +93,75 @@ test('the theme is a choice of this device that survives a reload', async () => 
 	await expect(html).toHaveAttribute('data-theme', 'dark');
 	await page.emulateMedia({ colorScheme: 'light' });
 	await expect(html).toHaveAttribute('data-theme', 'light');
+});
+
+test('the export says so where the browser cannot write into a folder', async () => {
+	await page.addInitScript(() => {
+		delete (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker;
+	});
+	await page.reload();
+	const archive = section('Archive');
+	await expect(archive.getByRole('button', { name: 'Export…' })).toBeDisabled();
+	await expect(archive.getByText('not available in this browser')).toBeVisible();
+});
+
+test('the export writes every message back as the file it came from', async () => {
+	// The folder dialog cannot be driven from a test: a picker kept in
+	// memory stands in, and records what the page writes into it. The row
+	// decides at load whether the picker exists, so it is installed for
+	// every load and the page reloaded.
+	await page.addInitScript(() => {
+		const files = new Map<string, Uint8Array>();
+		const folder = (path: string) => ({
+			name: 'exported',
+			getDirectoryHandle: (name: string) => Promise.resolve(folder(`${path}${name}/`)),
+			getFileHandle: (name: string) =>
+				Promise.resolve({
+					createWritable: () =>
+						Promise.resolve({
+							write: (data: Uint8Array) => {
+								files.set(`${path}${name}`, data);
+								return Promise.resolve();
+							},
+							close: () => Promise.resolve()
+						})
+				})
+		});
+		const w = window as unknown as {
+			showDirectoryPicker: () => Promise<unknown>;
+			exported: () => [string, number[]][];
+		};
+		w.showDirectoryPicker = () => Promise.resolve(folder(''));
+		w.exported = () => [...files].map(([name, bytes]) => [name, [...bytes]]);
+	});
+	await page.reload();
+	const archive = section('Archive');
+	await archive.getByRole('button', { name: 'Export…' }).click();
+	await expect(toast()).toContainText('3 messages written to exported.');
+	await expect(archive.getByText('3 messages written')).toBeVisible();
+
+	const files = await page.evaluate(() =>
+		(window as unknown as { exported: () => [string, number[]][] }).exported()
+	);
+	const names = files.map(([name]) => name).sort();
+	expect(names).toEqual([
+		expect.stringMatching(
+			/^2026\/2026-09-02_Re_Your_charging_summary_report_is_ready_[0-9a-f]{12}\.eml$/
+		),
+		expect.stringMatching(
+			/^2026\/2026-09-02_Your_charging_summary_report_is_ready_[0-9a-f]{12}\.eml$/
+		),
+		expect.stringMatching(/^2026\/2026-09-06_Tablón_de_Gómez_Project_.*_[0-9a-f]{12}\.eml$/)
+	]);
+	for (const [name, source] of [
+		['2026-09-02_Re_', 'reply.eml'],
+		['2026-09-02_Your_', 'report.eml'],
+		['2026-09-06_', 'newsletter.eml']
+	]) {
+		const written = files.find(([file]) => file.includes(name));
+		expect(written, name).toBeDefined();
+		expect(Buffer.from(written![1])).toEqual(await readFile(fixture(source)));
+	}
 });
 
 test('own addresses are saved to the manifest and survive a reload', async () => {

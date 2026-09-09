@@ -17,6 +17,7 @@
 		SessionExpiredError,
 		WrongPassphraseError
 	} from '$lib/account/errors';
+	import { exportArchive } from '$lib/account/export';
 	import { changePassphrase, regenerateRecoveryKey } from '$lib/account/rotate';
 	import { saveSettings } from '$lib/account/settings';
 	import { checkForSegments } from '$lib/account/sync';
@@ -39,6 +40,7 @@
 	} from '$lib/components';
 	import { PassphraseTooLongError, PassphraseTooShortError } from '$lib/crypto/kdf';
 	import { archive } from '$lib/state/archive.svelte';
+	import { exportState } from '$lib/state/export.svelte';
 	import { importState } from '$lib/state/import.svelte';
 	import { index } from '$lib/state/index.svelte';
 	import { onboarding } from '$lib/state/onboarding.svelte';
@@ -76,7 +78,9 @@
 		return () => window.removeEventListener('beforeunload', guard);
 	});
 
-	let working = $state<'addresses' | 'passphrase' | 'recovery' | 'cache' | 'lock' | null>(null);
+	let working = $state<
+		'addresses' | 'passphrase' | 'recovery' | 'export' | 'cache' | 'lock' | null
+	>(null);
 	let refused = $state<string | null>(null);
 	let problem = $state<{ where: string; text: string } | null>(null);
 
@@ -189,6 +193,50 @@
 		open = null;
 	}
 
+	// Writing files into a folder the user picks is the File System Access
+	// API, which not every browser has; the row says so where it is missing.
+	const canExport = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+	let exporting = $state<AbortController | null>(null);
+	const exportDetail = $derived.by(() => {
+		if (!canExport)
+			return 'not available in this browser · Chrome or Edge on a computer can write into a folder';
+		if (exportState.active)
+			return `${exportState.done.toLocaleString()} of ${exportState.total.toLocaleString()} written`;
+		if (exportState.status === 'idle') return 'one .eml file per message, into a folder you choose';
+		const written = count(exportState.done - exportState.failed, 'message');
+		const failed =
+			exportState.failed === 0 ? '' : `, ${count(exportState.failed, 'message')} skipped`;
+		return exportState.status === 'cancelled'
+			? `stopped after ${written}${failed}`
+			: `${written} written${failed}`;
+	});
+
+	async function exportAll(): Promise<void> {
+		// The picker must follow the click directly, before any await.
+		let folder: FileSystemDirectoryHandle;
+		try {
+			folder = await window.showDirectoryPicker({ mode: 'readwrite' });
+		} catch {
+			return; // Dismissed, or refused: nothing to do.
+		}
+		const controller = new AbortController();
+		exporting = controller;
+		try {
+			await run('export', async () => {
+				const summary = await exportArchive(folder, { signal: controller.signal });
+				if (!summary.cancelled) {
+					toasts.push({
+						tone: summary.failed === 0 ? 'ok' : 'accent',
+						label: 'exported',
+						message: `${count(summary.written, 'message')} written to ${folder.name}.`
+					});
+				}
+			});
+		} finally {
+			exporting = null;
+		}
+	}
+
 	function clearCache(): Promise<void> {
 		return run('cache', async () => {
 			await blobCache.clear();
@@ -299,6 +347,25 @@
 					Decrypting index, {count(index.loading.done, 'segment')} of {index.loading.total} so far.
 				</p>
 			{/if}
+			<SettingRow
+				title="Export as .eml files"
+				detail={exportDetail}
+				open={problem?.where === 'export'}
+			>
+				{#snippet action()}
+					{#if exporting !== null}
+						<Button variant="secondary" size="sm" onclick={() => exporting?.abort()}>Stop</Button>
+					{:else}
+						<Button
+							variant="secondary"
+							size="sm"
+							onclick={exportAll}
+							disabled={!canExport || index.messages === 0 || working !== null}>Export…</Button
+						>
+					{/if}
+				{/snippet}
+				{#if problem?.where === 'export'}<Notice>{problem.text}</Notice>{/if}
+			</SettingRow>
 		</SettingsSection>
 
 		<SettingsSection title="Appearance">
