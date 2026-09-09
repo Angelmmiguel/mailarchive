@@ -302,4 +302,32 @@
 		color: var(--text-faint);
 		white-space: nowrap;
 	}
+
+	/* Narrow: the sender above the line, and less margin around the page. */
+	@media (max-width: 599px) {
+		.scroll {
+			padding: var(--space-4) var(--space-4) var(--space-6);
+		}
+
+		.row {
+			grid-template-columns: minmax(0, 1fr) auto;
+			row-gap: 0;
+			padding: 6px 0;
+		}
+
+		.from {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		.snippet {
+			grid-column: 1;
+			grid-row: 2;
+		}
+
+		.date {
+			grid-column: 2;
+			grid-row: 1 / span 2;
+		}
+	}
 </style>

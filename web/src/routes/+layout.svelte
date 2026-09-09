@@ -111,11 +111,13 @@
 <Toasts />
 
 <style>
-	/* The viewport, so that the archive's panes scroll on their own. */
+	/* The viewport, so that the archive's panes scroll on their own. The
+	   dynamic unit keeps the bottom above a phone browser's own bars. */
 	.shell {
 		display: flex;
 		flex-direction: column;
 		height: 100vh;
+		height: 100dvh;
 	}
 
 	.brand {
@@ -131,5 +133,12 @@
 		flex-direction: column;
 		padding: 0 var(--space-5);
 		overflow-y: auto;
+		overflow-x: hidden;
+	}
+
+	@media (max-width: 719px) {
+		main {
+			padding: 0 var(--space-4);
+		}
 	}
 </style>

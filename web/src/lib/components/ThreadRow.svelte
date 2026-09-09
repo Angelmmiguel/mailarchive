@@ -168,4 +168,35 @@
 		color: var(--text-faint);
 		white-space: nowrap;
 	}
+
+	/* Narrow: who above what, so neither is squeezed beside the other. */
+	@media (max-width: 599px) {
+		.row {
+			grid-template-columns: 12px minmax(0, 1fr) auto;
+			grid-template-rows: auto auto;
+			row-gap: 2px;
+			height: auto;
+			min-height: 56px;
+			padding: var(--space-2) var(--space-3) var(--space-2) 10px;
+		}
+
+		.row > i {
+			grid-row: 1 / span 2;
+		}
+
+		.who {
+			grid-column: 2;
+			grid-row: 1;
+		}
+
+		.what {
+			grid-column: 2;
+			grid-row: 2;
+		}
+
+		.when {
+			grid-column: 3;
+			grid-row: 1 / span 2;
+		}
+	}
 </style>
