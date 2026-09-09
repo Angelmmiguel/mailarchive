@@ -29,6 +29,7 @@ in which case it goes straight to Archive.
 ## Onboarding (first run only)
 
 ### Create account `/setup`
+
 Passphrase and confirmation, with strength feedback. No username: the archive
 has exactly one account. Submitting derives the keys, registers the auth key
 with the server, creates the manifest and moves to Recovery key.
@@ -36,11 +37,13 @@ Errors: passphrases differ, too weak, server already set up (go to Unlock),
 server unreachable.
 
 ### Recovery key `/setup/recovery`
+
 Shows the recovery key once, with copy and download. Continue is disabled
 until the user confirms it is stored. Explains that losing both the
 passphrase and this key loses the archive. Moves to Own addresses.
 
 ### Own addresses `/setup/addresses`
+
 List of the user's email addresses, add and remove; `*` stands for anything,
 as in `*@icloud.com`. Used to derive the `sent` label and to show "to X"
 instead of "from me" in lists. Can be skipped and
@@ -50,12 +53,14 @@ import prompt.
 ## Access
 
 ### Unlock `/unlock`
+
 Passphrase field, unlock button, link to Recover. On success shows a short
 decrypting state with progress while the index loads, then Archive, or the
 location the user was at when the session expired.
 Errors: wrong passphrase, rate limited (with the wait), server unreachable.
 
 ### Recover `/recover`
+
 Three steps on one screen. Step 1: enter the recovery key, which is checked
 with the server. Step 2: set a new passphrase and confirmation. Step 3: the
 freshly generated recovery key, shown once, then Archive.
@@ -63,6 +68,7 @@ freshly generated recovery key, shown once, then Archive.
 ## Reading
 
 ### Archive `/`
+
 The main screen. A list of threads sorted by date, newest first, each row
 showing participants, subject, snippet, date, an attachment indicator and
 labels. Search field at the top, with a `?` beside it that opens the syntax
@@ -84,6 +90,7 @@ Selecting a row opens Thread. On wide screens Thread opens beside the list;
 on narrow screens it replaces it.
 
 ### Thread `/t/<thread key>`
+
 The messages of one conversation, oldest first, all collapsed except the
 latest. The key is an HMAC of the thread id under the id key, so the address
 a hard reload sends the server names nothing, and every device derives the
@@ -97,6 +104,7 @@ download it.
 ## Import
 
 ### Import (panel over Archive)
+
 Drop zone or pickers for `.eml` files and folders; the whole page is a drop
 target too. Once files are chosen, the panel turns into a progress view with
 counts for parsed, uploaded, skipped as duplicates and failed, an estimate,
@@ -109,11 +117,12 @@ failure (the run stops, what finished is kept, the panel says why).
 ## Settings
 
 ### Settings `/settings`
+
 Sections: own addresses (same editor as onboarding, saved when changed),
 change passphrase (asks for the current one), regenerate recovery key
 (asks for the current passphrase, shows Recovery key again), archive
-statistics (messages, threads, storage, segments), clear this device's
-cache, and Lock.
+statistics (messages, threads, storage, segments), the theme for this device
+(system or one of the looks), clear this device's cache, and Lock.
 
 ## Shell
 

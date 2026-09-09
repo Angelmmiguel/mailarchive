@@ -1,6 +1,6 @@
 <!--
   Settings: the own addresses, the credentials, the archive's figures and
-  what this device holds. Every change goes through the account layer; the
+  what this device holds and looks like. Every change goes through the account layer; the
   screen only decides what to show for each outcome. A locked session
   belongs to Unlock, which comes back here. A regenerated recovery key
   lives in the onboarding state until it is confirmed stored, so moving
@@ -34,7 +34,8 @@
 		RecoveryKeyPanel,
 		SettingRow,
 		SettingsSection,
-		StatTiles
+		StatTiles,
+		ThemePicker
 	} from '$lib/components';
 	import { PassphraseTooLongError, PassphraseTooShortError } from '$lib/crypto/kdf';
 	import { archive } from '$lib/state/archive.svelte';
@@ -42,6 +43,7 @@
 	import { index } from '$lib/state/index.svelte';
 	import { onboarding } from '$lib/state/onboarding.svelte';
 	import { session } from '$lib/state/session.svelte';
+	import { theme } from '$lib/state/theme.svelte';
 	import { toasts } from '$lib/state/toasts.svelte';
 
 	const HERE = '/settings';
@@ -297,6 +299,11 @@
 					Decrypting index, {count(index.loading.done, 'segment')} of {index.loading.total} so far.
 				</p>
 			{/if}
+		</SettingsSection>
+
+		<SettingsSection title="Appearance">
+			<ThemePicker value={theme.choice} system={theme.look} onchange={(t) => theme.choose(t)} />
+			<p class="hint">Kept on this device. System follows the browser between light and dark.</p>
 		</SettingsSection>
 
 		<SettingsSection title="This device">

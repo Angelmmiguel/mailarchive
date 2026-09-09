@@ -4,13 +4,14 @@
  * Two layers. Primitives (`--n-*`, `--amber*`, `--green*`, `--red*`, the
  * scales) are the palette and never appear in a component. Semantic tokens
  * (`--surface-*`, `--text-*`, `--border*`, `--accent*`, `--ok*`, `--danger*`)
- * are what components use. A theme is a second block that reassigns only the
- * semantic layer, for example `:root[data-theme='dark'] { --surface-page: … }`
- * together with `color-scheme: dark`; nothing in a component changes.
+ * are what components use. A theme is a block that assigns only the semantic
+ * colours under `data-theme`, together with `color-scheme`; nothing in a
+ * component changes. The theme state sets it on the document, and the theme
+ * picker sets it on each of its cards, so a card previews itself in its own
+ * theme. Light is the default; the others follow, each with its text and
+ * surfaces measured to clear 4.5:1 on every pairing.
  */
 :root {
-	color-scheme: light;
-
 	/* Primitives: cool neutrals, chroma at or below 0.012. */
 	--n-0: oklch(0.985 0.004 240);
 	--n-1: oklch(0.965 0.005 240);
@@ -32,34 +33,6 @@
 	--red: oklch(0.72 0.13 25);
 	--red-ink: oklch(0.48 0.13 25);
 	--red-soft: oklch(0.95 0.03 25);
-
-	/* Semantic: surfaces and text. */
-	--surface-page: var(--n-0);
-	--surface-panel: var(--n-1);
-	--surface-inset: var(--n-2);
-	--surface-ink: var(--n-8);
-	--text-body: var(--n-8);
-	--text-muted: var(--n-6);
-	--text-faint: var(--n-5);
-	--text-on-ink: var(--n-0);
-	--text-on-accent: var(--n-8);
-	--border: var(--n-3);
-	--border-strong: var(--n-4);
-	--border-focus: var(--n-8);
-
-	/* Semantic: amber is the only accent; green and red are meaning only. */
-	--accent: var(--amber);
-	--accent-ink: var(--amber-ink);
-	--accent-soft: var(--amber-soft);
-	--ok: var(--green);
-	--ok-ink: var(--green-ink);
-	--ok-soft: var(--green-soft);
-	--danger: var(--red);
-	--danger-ink: var(--red-ink);
-	--danger-soft: var(--red-soft);
-	--focus-ring: 0 0 0 2px var(--surface-page), 0 0 0 4px var(--accent);
-	--selection: var(--amber-soft);
-	--shadow-pop: 0 4px 16px oklch(0.2 0.01 240 / 0.1), 0 0 0 1px var(--border);
 
 	/* Type. Mono carries identifiers, time, size, keys; the body face carries language. */
 	--font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -100,4 +73,221 @@
 	--control-h: 32px;
 	--control-h-sm: 26px;
 	--hairline: 1px solid var(--border);
+}
+
+/* Light: the styleguide's own look. Semantic: surfaces and text, then
+   amber as the only accent; green and red are meaning only. */
+:root,
+[data-theme='light'] {
+	color-scheme: light;
+
+	--surface-page: var(--n-0);
+	--surface-panel: var(--n-1);
+	--surface-inset: var(--n-2);
+	--surface-ink: var(--n-8);
+	--text-body: var(--n-8);
+	--text-muted: var(--n-6);
+	--text-faint: var(--n-5);
+	--text-on-ink: var(--n-0);
+	--text-on-accent: var(--n-8);
+	--border: var(--n-3);
+	--border-strong: var(--n-4);
+	--border-focus: var(--n-8);
+
+	--accent: var(--amber);
+	--accent-ink: var(--amber-ink);
+	--accent-soft: var(--amber-soft);
+	--ok: var(--green);
+	--ok-ink: var(--green-ink);
+	--ok-soft: var(--green-soft);
+	--danger: var(--red);
+	--danger-ink: var(--red-ink);
+	--danger-soft: var(--red-soft);
+	--focus-ring: 0 0 0 2px var(--surface-page), 0 0 0 4px var(--accent);
+	--selection: var(--amber-soft);
+	--shadow-pop: 0 4px 16px oklch(0.2 0.01 240 / 0.1), 0 0 0 1px var(--border);
+}
+
+/*
+ * Dusk: the light theme's cool neutrals turned mid-grey, for reading in a
+ * dim room without the full contrast of dark. Ink and the soft tints are
+ * chosen so that every pairing clears 4.5:1.
+ */
+[data-theme='dusk'] {
+	color-scheme: dark;
+
+	--surface-page: oklch(0.33 0.012 240);
+	--surface-panel: oklch(0.37 0.012 240);
+	--surface-inset: oklch(0.42 0.012 240);
+	--surface-ink: oklch(0.95 0.005 240);
+	--text-body: oklch(0.95 0.005 240);
+	--text-muted: oklch(0.83 0.01 240);
+	--text-faint: oklch(0.74 0.01 240);
+	--text-on-ink: oklch(0.3 0.012 240);
+	--text-on-accent: oklch(0.2 0.012 240);
+	--border: oklch(0.44 0.012 240);
+	--border-strong: oklch(0.54 0.012 240);
+	--border-focus: oklch(0.95 0.005 240);
+
+	--accent: oklch(0.75 0.13 55);
+	--accent-ink: oklch(0.87 0.11 55);
+	--accent-soft: oklch(0.4 0.05 55);
+	--ok: oklch(0.75 0.13 145);
+	--ok-ink: oklch(0.87 0.11 145);
+	--ok-soft: oklch(0.4 0.05 145);
+	--danger: oklch(0.75 0.13 25);
+	--danger-ink: oklch(0.87 0.11 25);
+	--danger-soft: oklch(0.4 0.05 25);
+	--selection: oklch(0.5 0.07 55);
+	--shadow-pop: 0 4px 16px oklch(0.1 0.01 240 / 0.5), 0 0 0 1px var(--border);
+}
+
+/* Dark: near-black surfaces and the same amber, brightened a step. */
+[data-theme='dark'] {
+	color-scheme: dark;
+
+	--surface-page: oklch(0.19 0.01 240);
+	--surface-panel: oklch(0.23 0.011 240);
+	--surface-inset: oklch(0.28 0.012 240);
+	--surface-ink: oklch(0.93 0.005 240);
+	--text-body: oklch(0.93 0.005 240);
+	--text-muted: oklch(0.74 0.01 240);
+	--text-faint: oklch(0.62 0.01 240);
+	--text-on-ink: oklch(0.19 0.01 240);
+	--text-on-accent: oklch(0.2 0.012 240);
+	--border: oklch(0.3 0.012 240);
+	--border-strong: oklch(0.4 0.012 240);
+	--border-focus: oklch(0.93 0.005 240);
+
+	--accent: oklch(0.75 0.13 55);
+	--accent-ink: oklch(0.82 0.12 55);
+	--accent-soft: oklch(0.32 0.05 55);
+	--ok: oklch(0.75 0.13 145);
+	--ok-ink: oklch(0.82 0.12 145);
+	--ok-soft: oklch(0.3 0.05 145);
+	--danger: oklch(0.75 0.13 25);
+	--danger-ink: oklch(0.82 0.12 25);
+	--danger-soft: oklch(0.32 0.05 25);
+	--selection: oklch(0.42 0.07 55);
+	--shadow-pop: 0 4px 16px oklch(0.05 0.01 240 / 0.6), 0 0 0 1px var(--border);
+}
+
+/* Paper: the light ladder on warm cream, for long reading. */
+[data-theme='paper'] {
+	color-scheme: light;
+
+	--surface-page: oklch(0.975 0.014 85);
+	--surface-panel: oklch(0.955 0.016 85);
+	--surface-inset: oklch(0.925 0.018 85);
+	--surface-ink: oklch(0.22 0.02 60);
+	--text-body: oklch(0.22 0.02 60);
+	--text-muted: oklch(0.45 0.025 60);
+	--text-faint: oklch(0.53 0.025 60);
+	--text-on-ink: oklch(0.975 0.014 85);
+	--text-on-accent: oklch(0.2 0.012 240);
+	--border: oklch(0.885 0.018 85);
+	--border-strong: oklch(0.79 0.02 85);
+	--border-focus: oklch(0.22 0.02 60);
+
+	--accent: oklch(0.72 0.13 55);
+	--accent-ink: oklch(0.46 0.11 55);
+	--accent-soft: oklch(0.93 0.045 55);
+	--ok: oklch(0.72 0.13 145);
+	--ok-ink: oklch(0.44 0.1 145);
+	--ok-soft: oklch(0.93 0.04 145);
+	--danger: oklch(0.72 0.13 25);
+	--danger-ink: oklch(0.48 0.13 25);
+	--danger-soft: oklch(0.94 0.035 25);
+	--selection: oklch(0.93 0.045 55);
+	--shadow-pop: 0 4px 16px oklch(0.25 0.02 60 / 0.12), 0 0 0 1px var(--border);
+}
+
+/* Slate: light, but cooler and a step down from white. */
+[data-theme='slate'] {
+	color-scheme: light;
+
+	--surface-page: oklch(0.94 0.014 250);
+	--surface-panel: oklch(0.91 0.016 250);
+	--surface-inset: oklch(0.87 0.018 250);
+	--surface-ink: oklch(0.2 0.02 250);
+	--text-body: oklch(0.2 0.02 250);
+	--text-muted: oklch(0.42 0.025 250);
+	--text-faint: oklch(0.5 0.025 250);
+	--text-on-ink: oklch(0.94 0.014 250);
+	--text-on-accent: oklch(0.2 0.012 240);
+	--border: oklch(0.84 0.02 250);
+	--border-strong: oklch(0.74 0.025 250);
+	--border-focus: oklch(0.2 0.02 250);
+
+	--accent: oklch(0.72 0.13 55);
+	--accent-ink: oklch(0.45 0.11 55);
+	--accent-soft: oklch(0.9 0.05 55);
+	--ok: oklch(0.72 0.13 145);
+	--ok-ink: oklch(0.43 0.1 145);
+	--ok-soft: oklch(0.9 0.045 145);
+	--danger: oklch(0.72 0.13 25);
+	--danger-ink: oklch(0.47 0.13 25);
+	--danger-soft: oklch(0.9 0.04 25);
+	--selection: oklch(0.9 0.05 55);
+	--shadow-pop: 0 4px 16px oklch(0.2 0.02 250 / 0.14), 0 0 0 1px var(--border);
+}
+
+/* Midnight: the dark ladder tinted deep blue. */
+[data-theme='midnight'] {
+	color-scheme: dark;
+
+	--surface-page: oklch(0.2 0.035 265);
+	--surface-panel: oklch(0.24 0.036 265);
+	--surface-inset: oklch(0.29 0.037 265);
+	--surface-ink: oklch(0.93 0.01 265);
+	--text-body: oklch(0.93 0.01 265);
+	--text-muted: oklch(0.76 0.02 265);
+	--text-faint: oklch(0.64 0.025 265);
+	--text-on-ink: oklch(0.2 0.035 265);
+	--text-on-accent: oklch(0.2 0.012 240);
+	--border: oklch(0.31 0.037 265);
+	--border-strong: oklch(0.41 0.04 265);
+	--border-focus: oklch(0.93 0.01 265);
+
+	--accent: oklch(0.76 0.13 55);
+	--accent-ink: oklch(0.83 0.12 55);
+	--accent-soft: oklch(0.33 0.05 55);
+	--ok: oklch(0.75 0.13 145);
+	--ok-ink: oklch(0.82 0.12 145);
+	--ok-soft: oklch(0.31 0.05 145);
+	--danger: oklch(0.75 0.13 25);
+	--danger-ink: oklch(0.82 0.12 25);
+	--danger-soft: oklch(0.33 0.05 25);
+	--selection: oklch(0.42 0.07 55);
+	--shadow-pop: 0 4px 16px oklch(0.05 0.02 265 / 0.6), 0 0 0 1px var(--border);
+}
+
+/* Forest: the dark ladder tinted green. */
+[data-theme='forest'] {
+	color-scheme: dark;
+
+	--surface-page: oklch(0.22 0.028 155);
+	--surface-panel: oklch(0.26 0.03 155);
+	--surface-inset: oklch(0.31 0.032 155);
+	--surface-ink: oklch(0.94 0.01 150);
+	--text-body: oklch(0.94 0.01 150);
+	--text-muted: oklch(0.77 0.02 150);
+	--text-faint: oklch(0.65 0.025 150);
+	--text-on-ink: oklch(0.22 0.028 155);
+	--text-on-accent: oklch(0.2 0.012 240);
+	--border: oklch(0.33 0.032 155);
+	--border-strong: oklch(0.43 0.035 155);
+	--border-focus: oklch(0.94 0.01 150);
+
+	--accent: oklch(0.76 0.13 55);
+	--accent-ink: oklch(0.83 0.12 55);
+	--accent-soft: oklch(0.34 0.05 55);
+	--ok: oklch(0.75 0.13 145);
+	--ok-ink: oklch(0.84 0.12 145);
+	--ok-soft: oklch(0.33 0.05 145);
+	--danger: oklch(0.75 0.13 25);
+	--danger-ink: oklch(0.83 0.12 25);
+	--danger-soft: oklch(0.34 0.05 25);
+	--selection: oklch(0.42 0.07 55);
+	--shadow-pop: 0 4px 16px oklch(0.06 0.02 155 / 0.6), 0 0 0 1px var(--border);
 }

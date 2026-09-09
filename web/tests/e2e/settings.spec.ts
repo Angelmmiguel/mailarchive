@@ -68,6 +68,32 @@ test('Settings opens from the toolbar and shows the archive figures', async () =
 	).toBeVisible();
 });
 
+test('the theme is a choice of this device that survives a reload', async () => {
+	const html = page.locator('html');
+	const picker = section('Appearance').getByRole('radiogroup', { name: 'Theme' });
+	await expect(html).toHaveAttribute('data-theme', 'light');
+	await expect(picker.getByRole('radio', { name: 'System' })).toHaveAttribute(
+		'aria-checked',
+		'true'
+	);
+
+	await picker.getByRole('radio', { name: 'Dark' }).click();
+	await expect(html).toHaveAttribute('data-theme', 'dark');
+	await page.reload();
+	await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+	await expect(html).toHaveAttribute('data-theme', 'dark');
+	await expect(picker.getByRole('radio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true');
+
+	await picker.getByRole('radio', { name: 'Forest' }).click();
+	await expect(html).toHaveAttribute('data-theme', 'forest');
+	await picker.getByRole('radio', { name: 'System' }).click();
+	await expect(html).toHaveAttribute('data-theme', 'light');
+	await page.emulateMedia({ colorScheme: 'dark' });
+	await expect(html).toHaveAttribute('data-theme', 'dark');
+	await page.emulateMedia({ colorScheme: 'light' });
+	await expect(html).toHaveAttribute('data-theme', 'light');
+});
+
 test('own addresses are saved to the manifest and survive a reload', async () => {
 	const addresses = section('Own addresses');
 	await expect(addresses.getByRole('button', { name: 'Save' })).toBeDisabled();

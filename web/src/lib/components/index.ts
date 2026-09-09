@@ -35,6 +35,7 @@ export { default as StatTiles } from './StatTiles.svelte';
 export { default as Step } from './Step.svelte';
 export { default as Strip } from './Strip.svelte';
 export { default as Tag } from './Tag.svelte';
+export { default as ThemePicker } from './ThemePicker.svelte';
 export { default as ThreadList } from './ThreadList.svelte';
 export { default as ThreadReader } from './ThreadReader.svelte';
 export { default as ThreadRow } from './ThreadRow.svelte';
