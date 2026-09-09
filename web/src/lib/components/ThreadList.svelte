@@ -5,7 +5,7 @@
   field. Nothing found is a state of its own, with the way out of it.
 -->
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import type { ResolvedPathname } from '$app/types';
 	import { count } from '$lib/app/format';
 	import { participantsOf, type Thread } from '$lib/index/threads';
@@ -116,11 +116,19 @@
 		if (list.scrollTop + list.clientHeight > list.scrollHeight - 800) limit += PAGE;
 	}
 
+	// The selection last brought into view. Only a new one is scrolled to:
+	// the pages that arrive while the reader scrolls the list must not pull
+	// it back to the open thread.
+	let revealed: string | null = null;
+
 	// A new selection may sit below the fold, or beyond the loaded page.
 	$effect(() => {
-		if (selected === null || list === null) return;
+		if (selected === null || list === null || selected === revealed) return;
 		const at = threads.findIndex((t) => t.id === selected);
-		if (at >= limit) limit = at + PAGE;
+		// Not listed yet: the index may still be loading. Try again with it.
+		if (at === -1) return;
+		if (at >= untrack(() => limit)) limit = at + PAGE;
+		revealed = selected;
 		queueMicrotask(() => {
 			list?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
 		});
