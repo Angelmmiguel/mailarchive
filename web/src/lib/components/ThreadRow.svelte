@@ -175,8 +175,7 @@
 			grid-template-columns: 12px minmax(0, 1fr) auto;
 			grid-template-rows: auto auto;
 			row-gap: 2px;
-			height: auto;
-			min-height: 56px;
+			height: 56px;
 			padding: var(--space-2) var(--space-3) var(--space-2) 10px;
 		}
 

@@ -1,6 +1,7 @@
 <!--
   The list of threads: the chips that edit the query, the count, the rows.
-  Rows come in pages as the list is scrolled, and the arrow keys (or j and
+  Only the rows near the viewport are in the document, so a listing of
+  thousands opens and scrolls as one of ten would, and the arrow keys (or j and
   k) move the selection from anywhere on the screen that is not a text
   field. Nothing found is a state of its own, with the way out of it.
 -->
@@ -51,10 +52,16 @@
 		banner
 	}: Props = $props();
 
-	const PAGE = 100;
-	let limit = $state(PAGE);
+	// Every row is this tall, which is what lets the list place them by index.
+	const ROW = 56;
+	// Rows kept beyond each edge of the viewport, so a flick has something to show.
+	const OVERSCAN = 10;
 	let list = $state<HTMLElement | null>(null);
-	const shown = $derived(threads.slice(0, limit));
+	let scrollTop = $state(0);
+	let height = $state(0);
+	const start = $derived(Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN));
+	const end = $derived(Math.min(threads.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN));
+	const shown = $derived(threads.slice(start, end));
 
 	const parsed = $derived(parseQuery(query));
 	const ranges = $derived(presets(years));
@@ -112,26 +119,20 @@
 	const tail = $derived(between === null ? '.' : ` ${between}.`);
 
 	function scrolled(): void {
-		if (list === null || limit >= threads.length) return;
-		if (list.scrollTop + list.clientHeight > list.scrollHeight - 800) limit += PAGE;
+		if (list !== null) scrollTop = list.scrollTop;
 	}
 
-	// The selection last brought into view. Only a new one is scrolled to:
-	// the pages that arrive while the reader scrolls the list must not pull
-	// it back to the open thread.
-	let revealed: string | null = null;
-
-	// A new selection may sit below the fold, or beyond the loaded page.
+	// A new selection, or a new listing around it, may put the open thread
+	// anywhere, rendered or not: the nearest edge of the viewport moves to
+	// its row. Scrolling is not tracked here, so it never pulls the list back.
 	$effect(() => {
-		if (selected === null || list === null || selected === revealed) return;
+		if (selected === null || list === null || height === 0) return;
 		const at = threads.findIndex((t) => t.id === selected);
-		// Not listed yet: the index may still be loading. Try again with it.
 		if (at === -1) return;
-		if (at >= untrack(() => limit)) limit = at + PAGE;
-		revealed = selected;
-		queueMicrotask(() => {
-			list?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
-		});
+		const top = at * ROW;
+		const seen = untrack(() => scrollTop);
+		if (top < seen) list.scrollTop = top;
+		else if (top + ROW > seen + height) list.scrollTop = top + ROW - height;
 	});
 
 	function keydown(event: KeyboardEvent): void {
@@ -182,34 +183,38 @@
 				<span class="indexing" role="status">· indexing {indexing.done}/{indexing.total}</span>{/if}
 		</span>
 	</div>
-	<div class="rows" bind:this={list} onscroll={scrolled}>
-		{#each shown as thread (thread.id)}
-			<ThreadRow
-				{thread}
-				participants={participantsOf(thread, own)}
-				href={hrefFor(thread)}
-				selected={thread.id === selected}
-			/>
+	<div class="rows" bind:this={list} bind:clientHeight={height} onscroll={scrolled}>
+		{#if threads.length > 0}
+			<div class="canvas" style:height="{threads.length * ROW}px">
+				<div class="window" style:transform="translateY({start * ROW}px)">
+					{#each shown as thread (thread.id)}
+						<ThreadRow
+							{thread}
+							participants={participantsOf(thread, own)}
+							href={hrefFor(thread)}
+							selected={thread.id === selected}
+						/>
+					{/each}
+				</div>
+			</div>
+		{:else if isEmpty(parsed)}
+			<p class="none">No threads yet.</p>
 		{:else}
-			{#if isEmpty(parsed)}
-				<p class="none">No threads yet.</p>
-			{:else}
-				<section class="empty" aria-labelledby="no-results">
-					<h2 id="no-results">No results</h2>
-					<p>
-						{lead}{#if rest !== ''}<code>{rest}</code>{/if}{tail}
-					</p>
-					<div class="actions">
-						{#if between !== null}
-							<Button variant="secondary" size="sm" onclick={() => onquery(withoutDates(query))}
-								>Clear date range</Button
-							>
-						{/if}
-						<Button variant="secondary" size="sm" onclick={() => onquery('')}>Clear all</Button>
-					</div>
-				</section>
-			{/if}
-		{/each}
+			<section class="empty" aria-labelledby="no-results">
+				<h2 id="no-results">No results</h2>
+				<p>
+					{lead}{#if rest !== ''}<code>{rest}</code>{/if}{tail}
+				</p>
+				<div class="actions">
+					{#if between !== null}
+						<Button variant="secondary" size="sm" onclick={() => onquery(withoutDates(query))}
+							>Clear date range</Button
+						>
+					{/if}
+					<Button variant="secondary" size="sm" onclick={() => onquery('')}>Clear all</Button>
+				</div>
+			</section>
+		{/if}
 	</div>
 </section>
 
@@ -246,6 +251,16 @@
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
+	}
+
+	.canvas {
+		position: relative;
+		overflow: hidden;
+	}
+
+	.window {
+		position: absolute;
+		inset: 0 0 auto;
 	}
 
 	.none {

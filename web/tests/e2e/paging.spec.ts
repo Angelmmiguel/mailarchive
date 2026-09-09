@@ -1,7 +1,8 @@
 /**
- * The list past its first page, on a server this file fills with more
- * synthetic messages than one page holds: scrolling brings the next page
- * without pulling the list back to the open thread.
+ * The list with more threads than fit on screen, on a server this file
+ * fills with synthetic messages: only the rows near the viewport are in
+ * the document, scrolling does not pull the list back to the open thread,
+ * and a change of order or query brings that thread into view at once.
  */
 import { expect, test, type Page } from '@playwright/test';
 import { startServer, type Server } from '../server';
@@ -9,12 +10,10 @@ import { startServer, type Server } from '../server';
 const PASSPHRASE = 'correct horse battery staple';
 const MESSAGES = 110;
 
-test.describe.configure({ mode: 'serial' });
-
 let server: Server;
 let page: Page;
 
-/** One plain message per number, each its own thread, newest first. */
+/** One plain message per number, each its own thread, newest last. */
 function message(n: number): { name: string; mimeType: string; buffer: Buffer } {
 	const day = String(1 + (n % 28)).padStart(2, '0');
 	const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May'][Math.floor(n / 28)];
@@ -60,20 +59,57 @@ test.afterAll(async () => {
 
 const list = () => page.getByRole('region', { name: 'Threads' });
 const rows = () => list().getByRole('link');
+const row = (n: number) => rows().filter({ hasText: new RegExp(`Message number ${n}\\b`) });
 const scroller = () => list().locator('.rows');
+const open = () => list().locator('[aria-current="page"]');
 
-test('the list shows one page, and the next when scrolled to the end, without pulling it back to the open thread', async () => {
+async function order(name: string): Promise<void> {
+	await page.getByRole('button', { name: 'date' }).click();
+	await page.getByRole('menuitemradio', { name }).click();
+}
+
+test('only the rows near the viewport are in the document', async () => {
 	await expect(page.getByText(`${MESSAGES} threads`)).toBeVisible();
-	await expect(rows()).toHaveCount(100);
-
-	await rows().first().click();
-	await expect(page.getByRole('article', { name: `Message number ${MESSAGES - 1}` })).toBeVisible();
-	await expect(rows().first()).toHaveAttribute('aria-current', 'page');
+	await expect(row(MESSAGES - 1)).toBeInViewport();
+	expect(await rows().count()).toBeLessThan(MESSAGES / 2);
 
 	await scroller().evaluate((el) => el.scrollTo(0, el.scrollHeight));
-	await expect(rows()).toHaveCount(MESSAGES);
-	// The open thread sits at the top, far above where the reader scrolled.
-	await expect(rows().first()).not.toBeInViewport();
-	const scrollTop = await scroller().evaluate((el) => el.scrollTop);
-	expect(scrollTop).toBeGreaterThan(1000);
+	await expect(row(0)).toBeInViewport();
+	await expect(row(MESSAGES - 1)).toHaveCount(0);
+	expect(await rows().count()).toBeLessThan(MESSAGES / 2);
+	await scroller().evaluate((el) => el.scrollTo(0, 0));
+});
+
+test('scrolling does not pull the list back to the open thread', async () => {
+	await row(MESSAGES - 1).click();
+	await expect(page.getByRole('article', { name: `Message number ${MESSAGES - 1}` })).toBeVisible();
+	await expect(open()).toContainText(`Message number ${MESSAGES - 1}`);
+
+	await scroller().evaluate((el) => el.scrollTo(0, el.scrollHeight));
+	await expect(row(0)).toBeInViewport();
+	await expect(open()).toHaveCount(0);
+	expect(await scroller().evaluate((el) => el.scrollTop)).toBeGreaterThan(1000);
+});
+
+test('a new order or query brings the open thread into view at once', async () => {
+	await order('Oldest first');
+	// The open thread is kept in view, at the bottom now; the oldest is at the top.
+	await scroller().evaluate((el) => el.scrollTo(0, 0));
+	await row(0).click();
+	await expect(page.getByRole('article', { name: 'Message number 0' })).toBeVisible();
+	await expect(open()).toBeInViewport();
+
+	await order('Newest first');
+	await expect(row(0)).toBeInViewport();
+	await expect(open()).toContainText('Message number 0');
+	expect(await scroller().evaluate((el) => el.scrollTop)).toBeGreaterThan(1000);
+
+	const box = page.getByRole('searchbox');
+	await box.fill('from:sender-0@');
+	await expect(page.getByText('1 thread', { exact: true })).toBeVisible();
+	await expect(open()).toBeInViewport();
+	await box.fill('');
+	await expect(page.getByText(`${MESSAGES} threads`)).toBeVisible();
+	await expect(open()).toContainText('Message number 0');
+	await expect(open()).toBeInViewport();
 });
