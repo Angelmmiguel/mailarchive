@@ -1,0 +1,35 @@
+Return-Path: <friend@example.net>
+Delivered-To: reader@example.org
+Received: from mail.example.net ([10.0.0.21])
+        by mx.example.org
+        with SMTP id PHOTOS1
+        for reader@example.org;
+        Tue, 08 Sep 2026 18:02:10 +0200 (CEST)
+Date: Tue, 08 Sep 2026 18:01:55 +0200
+From: A Friend <friend@example.net>
+Message-ID: <photos-1@example.net>
+Subject: Two photos from the hike
+To: reader@example.org
+Mime-Version: 1.0
+Content-Type: multipart/mixed; boundary="------------photos@fixture"
+
+--------------photos@fixture
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+Here they are.
+
+--------------photos@fixture
+Content-Type: image/jpeg; name="IMG_0001.jpeg"
+Content-Transfer-Encoding: base64
+Content-Disposition: inline; filename="IMG_0001.jpeg"
+Content-ID: <IMG_0001@example.net>
+
+/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a
+--------------photos@fixture
+Content-Type: image/jpeg; name="IMG_0002.jpeg"
+Content-Transfer-Encoding: base64
+Content-Disposition: inline; filename="IMG_0002.jpeg"
+
+/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a
+--------------photos@fixture--

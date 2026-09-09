@@ -16,7 +16,11 @@ export interface AttachmentMeta {
 	name: string;
 	type: string;
 	size: number;
-	/** Referenced from the HTML body (cid) rather than offered as a file. */
+	/**
+	 * Referenced from the HTML body by content id, so it shows there and
+	 * is not offered as a file. A photo a phone sends as `inline` next to
+	 * a plain text body is a file like any other.
+	 */
 	inline: boolean;
 	/** Position among the parsed attachments, for extracting it from raw. */
 	index: number;
@@ -73,6 +77,7 @@ export async function parseMessage(bytes: Uint8Array): Promise<ParsedMessage> {
 		throw new MessageParseError('no headers');
 	}
 	const html = email.html ?? null;
+	const embedded = contentIdsIn(html);
 	const text = email.text?.trim() ? email.text : html === null ? '' : htmlToText(html);
 	return {
 		messageId: stripId(email.messageId),
@@ -92,7 +97,7 @@ export async function parseMessage(bytes: Uint8Array): Promise<ParsedMessage> {
 			name: a.filename ?? `part-${index + 1}`,
 			type: a.mimeType,
 			size: byteLength(a.content),
-			inline: a.disposition === 'inline' || (a.related === true && a.contentId !== undefined),
+			inline: a.contentId !== undefined && embedded.has(stripId(a.contentId) ?? ''),
 			index
 		}))
 	};
@@ -102,6 +107,20 @@ export async function parseMessage(bytes: Uint8Array): Promise<ParsedMessage> {
 export function snippetOf(text: string): string {
 	const flat = text.replace(/\s+/g, ' ').trim();
 	return flat.length <= SNIPPET_LENGTH ? flat : `${flat.slice(0, SNIPPET_LENGTH - 1)}…`;
+}
+
+/** The content ids an HTML body references as `cid:` URLs. */
+function contentIdsIn(html: string | null): Set<string> {
+	const ids = new Set<string>();
+	if (html === null) return ids;
+	for (const [, id] of html.matchAll(/cid:([^"'\s)>]+)/gi)) {
+		try {
+			ids.add(decodeURIComponent(id));
+		} catch {
+			ids.add(id);
+		}
+	}
+	return ids;
 }
 
 function stripId(value: string | undefined): string | null {

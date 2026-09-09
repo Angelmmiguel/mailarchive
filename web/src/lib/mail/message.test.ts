@@ -44,6 +44,16 @@ describe('parseMessage', () => {
 		expect(m.text).toContain('Total energy: 184 kWh over 12 sessions.');
 	});
 
+	it('offers a photo sent as inline next to a plain text body as a file', async () => {
+		const m = await parseMessage(await fixture('photos.eml'));
+
+		expect(m.html).toBeNull();
+		expect(m.attachments.map((a) => [a.name, a.inline])).toEqual([
+			['IMG_0001.jpeg', false],
+			['IMG_0002.jpeg', false]
+		]);
+	});
+
 	it('reads threading headers and a plain text body', async () => {
 		const m = await parseMessage(await fixture('reply.eml'));
 
