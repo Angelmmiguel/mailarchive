@@ -20,7 +20,7 @@ export interface ImportFailure {
 	reason: string;
 }
 
-/** Failures listed in the panel; the count keeps going past this. */
+/** Failures and duplicates listed in the panel; the counts keep going past this. */
 export const FAILURES_SHOWN = 50;
 
 const zero = (): ImportCounts => ({
@@ -38,6 +38,8 @@ class ImportState {
 	label = $state('');
 	counts = $state<ImportCounts>(zero());
 	failures = $state<ImportFailure[]>([]);
+	/** Files skipped as already archived, with what matched. */
+	duplicates = $state<ImportFailure[]>([]);
 	/** Why the run stopped short of finishing, if it did. */
 	error = $state<string | null>(null);
 	panelOpen = $state(false);
@@ -65,6 +67,7 @@ class ImportState {
 		this.label = label;
 		this.counts = { ...zero(), total };
 		this.failures = [];
+		this.duplicates = [];
 		this.error = null;
 		this.startedAt = Date.now();
 		this.now = this.startedAt;
@@ -76,11 +79,19 @@ class ImportState {
 		this.counts.failed++;
 	}
 
+	duplicate(path: string, reason: string): void {
+		if (this.duplicates.length < FAILURES_SHOWN) {
+			this.duplicates = [...this.duplicates, { path, reason }];
+		}
+		this.counts.duplicates++;
+	}
+
 	reset(): void {
 		this.status = 'idle';
 		this.label = '';
 		this.counts = zero();
 		this.failures = [];
+		this.duplicates = [];
 		this.error = null;
 		this.startedAt = null;
 		this.writing = { done: 0, total: 0 };

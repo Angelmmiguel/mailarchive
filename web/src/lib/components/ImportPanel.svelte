@@ -1,6 +1,6 @@
 <!--
   The import panel over the archive: the drop zone before a run, the
-  progress, counts and failures during and after it. The user can close
+  progress, counts, failures and the files already archived during and after it. The user can close
   it and keep browsing; the toolbar shows the run is still going.
 -->
 <script lang="ts">
@@ -99,6 +99,19 @@
 						{#each importState.failures as failure, i (i)}
 							<li>
 								<span class="path">{failure.path}</span><span class="why">{failure.reason}</span>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
+			{#if importState.duplicates.length > 0}
+				<section class="failures" data-testid="duplicates">
+					<h2>Already in the archive</h2>
+					<ul>
+						{#each importState.duplicates as duplicate, i (i)}
+							<li>
+								<span class="path">{duplicate.path}</span><span class="how">{duplicate.reason}</span
+								>
 							</li>
 						{/each}
 					</ul>
@@ -277,6 +290,11 @@
 
 	.why {
 		color: var(--danger-ink);
+		white-space: nowrap;
+	}
+
+	.how {
+		color: var(--text-faint);
 		white-space: nowrap;
 	}
 

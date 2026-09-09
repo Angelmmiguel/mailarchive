@@ -82,6 +82,10 @@ test('importing the same messages again finds only duplicates', async () => {
 		.setInputFiles([fixture('report.eml'), fixture('report-reexport.eml')]);
 
 	await expect(panel.locator('dd')).toHaveText(['1', '0', '2', '0']);
+	await expect(panel.getByTestId('duplicates').locator('li')).toHaveText([
+		/report\.eml.*same bytes/,
+		/report-reexport\.eml.*same headers/
+	]);
 	await expect(page.getByTestId('toast').last()).toContainText(
 		'Import finished. 0 messages added, 2 duplicates, 0 failed.'
 	);

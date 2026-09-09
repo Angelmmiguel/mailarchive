@@ -123,6 +123,10 @@ describe('runImport', () => {
 		const summary = await run(await files('report.eml', 'report-reexport.eml'));
 
 		expect(summary).toMatchObject({ added: 0, duplicates: 2, failed: 0, segments: [] });
+		expect(importState.duplicates).toEqual([
+			{ path: 'report.eml', reason: 'same bytes' },
+			{ path: 'report-reexport.eml', reason: 'same headers' }
+		]);
 		expect(api.putBlob).not.toHaveBeenCalled();
 		expect(importState.counts.parsed).toBe(1);
 	});
