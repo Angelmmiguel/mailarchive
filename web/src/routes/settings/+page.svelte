@@ -457,15 +457,19 @@
 				{/snippet}
 				{#if problem?.where === 'export'}<Notice>{problem.text}</Notice>{/if}
 				{#if exportState.skipped.length > 0}
-					<ul class="skipped" aria-label="Skipped messages">
-						{#each exportState.skipped as skip, i (i)}
-							<li>
-								<span class="what"
-									>{skip.subject.trim() === '' ? '(no subject)' : skip.subject}</span
-								><span class="why">{skip.reason}</span>
-							</li>
-						{/each}
-					</ul>
+					<section class="log" aria-label="Export log">
+						<h3>Export log</h3>
+						<ul>
+							{#each exportState.skipped as skip, i (i)}
+								<li>
+									<span class="what"
+										>{skip.subject.trim() === '' ? '(no subject)' : skip.subject}</span
+									>
+									<span class="why">{skip.reason}</span>
+								</li>
+							{/each}
+						</ul>
+					</section>
 				{/if}
 			</SettingRow>
 			<SettingRow title="Rebuild index" detail={rebuildDetail} open={problem?.where === 'rebuild'}>
@@ -580,27 +584,44 @@
 		color: var(--text-muted);
 	}
 
-	.skipped {
+	.log {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.log h3 {
 		margin: 0;
-		padding: 0;
+		font: var(--mono-xs) / var(--mono-leading) var(--font-mono);
+		letter-spacing: var(--mono-tracking);
+		text-transform: uppercase;
+		color: var(--text-faint);
+	}
+
+	.log ul {
+		margin: 0;
+		padding: 0 0 var(--space-2);
 		list-style: none;
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
+		overflow-x: auto;
 	}
 
-	.skipped li {
+	.log li {
 		display: flex;
-		justify-content: space-between;
 		gap: var(--space-3);
 		font: var(--mono-md) var(--font-mono);
 		color: var(--text-muted);
+		white-space: nowrap;
 	}
 
 	.what {
+		flex: none;
+		max-width: 40ch;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 
 	.why {

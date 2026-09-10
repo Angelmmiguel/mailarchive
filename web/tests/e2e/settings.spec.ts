@@ -151,7 +151,7 @@ test('the export writes every message back as the file it came from', async () =
 		expect.stringMatching(
 			/^2026\/2026-09-02_Your_charging_summary_report_is_ready_[0-9a-f]{12}\.eml$/
 		),
-		expect.stringMatching(/^2026\/2026-09-06_Tablón_de_Gómez_Project_.*_[0-9a-f]{12}\.eml$/)
+		expect.stringMatching(/^2026\/2026-09-06_Tablón_de_Gómez_Project_[0-9a-f]{12}\.eml$/)
 	]);
 	for (const [name, source] of [
 		['2026-09-02_Re_', 'reply.eml'],
