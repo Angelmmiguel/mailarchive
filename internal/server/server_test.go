@@ -618,12 +618,18 @@ func TestBlobWriteOnce(t *testing.T) {
 	id := blobID("a")
 
 	h.mustStatus(h.do(http.MethodPut, "/api/blobs/"+id, strings.NewReader("first")), http.StatusCreated)
-	r := h.do(http.MethodPut, "/api/blobs/"+id, strings.NewReader("second"))
+	// A repeat larger than any socket buffer: the answer must wait for the
+	// whole body, or the client sees a reset instead of the 409.
+	second := &countingReader{Reader: bytes.NewReader(make([]byte, 4<<20))}
+	r := h.do(http.MethodPut, "/api/blobs/"+id, second)
 	if r.status != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", r.status)
 	}
 	if code := r.errorCode(t); code != "exists" {
 		t.Errorf("error = %q, want exists", code)
+	}
+	if second.n != 4<<20 {
+		t.Errorf("body read = %d bytes, want all %d", second.n, 4<<20)
 	}
 	if body := h.mustStatus(h.do(http.MethodGet, "/api/blobs/"+id, nil), http.StatusOK).body; string(body) != "first" {
 		t.Fatalf("blob = %q, want first", body)
@@ -1158,4 +1164,16 @@ func TestSessionKey(t *testing.T) {
 	h.mustStatus(get(), http.StatusUnauthorized)
 	h.mustStatus(h.login(authKey(1)), http.StatusNoContent)
 	h.mustStatus(get(), http.StatusNotFound)
+}
+
+// countingReader records how much of a request body the server took.
+type countingReader struct {
+	io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.Reader.Read(p)
+	c.n += n
+	return n, err
 }

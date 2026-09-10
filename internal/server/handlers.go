@@ -563,6 +563,11 @@ func (s *Server) handlePutBlob(w http.ResponseWriter, r *http.Request) {
 	switch err := s.store.Put(r.Context(), id, body); {
 	case err == nil:
 	case errors.Is(err, store.ErrExists):
+		// The store answers before reading the body. Answering while the
+		// client is still sending closes the connection under it, which a
+		// proxy in front reports as a reset; the body is bounded, so it is
+		// read to the end first.
+		_, _ = io.Copy(io.Discard, body)
 		writeError(w, http.StatusConflict, codeExists)
 		return
 	case tooLarge(err):
