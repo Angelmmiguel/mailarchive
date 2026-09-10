@@ -10,7 +10,7 @@ import { index } from '$lib/state/index.svelte';
 import { session } from '$lib/state/session.svelte';
 import { createTestAccount, mockApi, type MockApi, type TestAccount } from '$lib/testing/account';
 import { LockedError } from './errors';
-import { exportArchive, fileName, yearOf, type ExportFolder } from './export';
+import { exportArchive, fileName, NAME_BYTES, yearOf, type ExportFolder } from './export';
 
 let api: MockApi;
 let account: TestAccount;
@@ -118,6 +118,9 @@ describe('exportArchive', () => {
 		expect(summary).toEqual({ written: 1, failed: 1, cancelled: false });
 		expect(files.size).toBe(1);
 		expect(exportState.failed).toBe(1);
+		expect(exportState.skipped).toEqual([
+			{ subject: 'Re: Señal', reason: expect.stringMatching(/listed in the index but not stored/) }
+		]);
 	});
 
 	it('stops where it is when cancelled', async () => {
@@ -170,5 +173,15 @@ describe('fileName', () => {
 		);
 		expect(yearOf({ date: null })).toBe('undated');
 		expect(yearOf({ date: '1999-01-01T00:00:00.000Z' })).toBe('1999');
+	});
+
+	it('drops control characters and stays under the byte limit', () => {
+		const id = 'f'.repeat(64);
+		expect(fileName({ id, date: null, subject: 'a\tb\u0000c\u001fd' })).toBe(
+			'undated_a_b_c_d_ffffffffffff.eml'
+		);
+		const name = fileName({ id, date: '2021-09-30T08:19:12.000Z', subject: '🇨🇴'.repeat(80) });
+		expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(NAME_BYTES);
+		expect(name).toMatch(/^2021-09-30_(?:\u{1F1E8}\u{1F1F4})+_ffffffffffff\.eml$/u);
 	});
 });

@@ -441,7 +441,7 @@
 			<SettingRow
 				title="Export as .eml files"
 				detail={exportDetail}
-				open={problem?.where === 'export'}
+				open={problem?.where === 'export' || exportState.skipped.length > 0}
 			>
 				{#snippet action()}
 					{#if exporting !== null}
@@ -456,6 +456,17 @@
 					{/if}
 				{/snippet}
 				{#if problem?.where === 'export'}<Notice>{problem.text}</Notice>{/if}
+				{#if exportState.skipped.length > 0}
+					<ul class="skipped" aria-label="Skipped messages">
+						{#each exportState.skipped as skip, i (i)}
+							<li>
+								<span class="what"
+									>{skip.subject.trim() === '' ? '(no subject)' : skip.subject}</span
+								><span class="why">{skip.reason}</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			</SettingRow>
 			<SettingRow title="Rebuild index" detail={rebuildDetail} open={problem?.where === 'rebuild'}>
 				{#snippet action()}
@@ -567,6 +578,34 @@
 		margin: 0;
 		font: var(--body-sm) / var(--body-leading) var(--font-body);
 		color: var(--text-muted);
+	}
+
+	.skipped {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.skipped li {
+		display: flex;
+		justify-content: space-between;
+		gap: var(--space-3);
+		font: var(--mono-md) var(--font-mono);
+		color: var(--text-muted);
+	}
+
+	.what {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.why {
+		color: var(--danger-ink);
+		white-space: nowrap;
 	}
 
 	.save {
