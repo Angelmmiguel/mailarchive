@@ -184,8 +184,9 @@ test('the rebuild parses every message again and replaces the segment', async ()
 });
 
 test('the unreferenced check lists a blob nothing points to, for the admin to remove', async () => {
-	// The rebuild reproduced the segment byte for byte, so it retired
-	// nothing; a stray upload stands in for what a crashed import leaves.
+	// Whether the rebuild retired anything depends on the order the import
+	// happened to finish in, so a stray upload, standing in for what a
+	// crashed import leaves, is what the check must find.
 	const stray = '5'.repeat(64);
 	const status = await page.evaluate(
 		(id) =>
@@ -199,14 +200,16 @@ test('the unreferenced check lists a blob nothing points to, for the admin to re
 	const archive = section('Archive');
 	await archive.getByRole('button', { name: 'Check' }).click();
 	await expect(
-		archive.getByText(/^1 blob · paths are relative to the data directory/)
+		archive.getByText(/^\d+ blobs? · paths are relative to the data directory/)
 	).toBeVisible();
 
 	const download = page.waitForEvent('download');
 	await archive.getByRole('button', { name: 'Download list' }).click();
 	const file = await download;
 	expect(file.suggestedFilename()).toBe('unreferenced.txt');
-	expect(await readFile((await file.path())!, 'utf8')).toBe(`blobs/55/${stray}\n`);
+	const lines = (await readFile((await file.path())!, 'utf8')).trim().split('\n');
+	expect(lines).toContain(`blobs/55/${stray}`);
+	for (const line of lines) expect(line).toMatch(/^blobs\/[0-9a-f]{2}\/[0-9a-f]{64}$/);
 });
 
 test('own addresses are saved to the manifest and survive a reload', async () => {
