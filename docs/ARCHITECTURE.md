@@ -95,10 +95,10 @@ shard to its segment.
 
 A record holds only what the message itself says. Segments are immutable and
 a re-import of the same message is skipped as a duplicate, so anything written
-into a record is frozen at import: a value that also depends on a setting
-would keep answering for the setting as it was that day, and the only way to
-correct it would be to rebuild the archive. Whatever follows from a setting,
-or from another message, is worked out from the records when they are read.
+into a record is frozen at import until the index is rebuilt (below): a value
+that also depends on a setting would keep answering for the setting as it was
+that day. Whatever follows from a setting, or from another message, is worked
+out from the records when they are read.
 
 ### Term shards
 
@@ -303,9 +303,34 @@ sizes to fixed buckets is a cheap future hardening.
 
 A run that is cancelled or stopped by a failure still writes a segment for the
 messages it finished, so nothing uploaded has to be imported again. A crash
-mid-way leaves orphan blobs but no dangling segment. Orphans are harmless and
-can be garbage-collected later by a client-side job that compares the manifest
-against the server listing.
+mid-way leaves orphan blobs but no dangling segment. Orphans are harmless;
+the unreferenced check below finds them.
+
+### Rebuild and unreferenced blobs
+
+A rebuild, from Settings, brings every archived message up to the parser as
+it is now: it fetches each raw blob, parses it again through the import
+worker, seals the view and writes fresh segments with the import's segment
+writer, then replaces the segment list in one manifest write under the ETag,
+keeping any segment another device appended meanwhile. Blobs are
+content-addressed, so a view the parser still produces byte for byte is
+answered 409 and nothing is uploaded twice; the raw blobs are never touched.
+Messages are threaded again from scratch, in date order. An original the
+server no longer has, or one the parser now refuses, keeps its record as it
+was, so a rebuild never loses a message. The manifest is written last: a
+cancel, a failure or a crash before that leaves the archive exactly as it
+was. Blobs stay write-once and append-only; the manifest's segment list is a
+set of pointers that a rebuild may swap, not a log.
+
+What a rebuild retires, and what a crashed import uploaded, stays on the
+server unreferenced. Settings can list those blobs, comparing the server's
+listing against the manifest (fetched again first) and every record's raw
+and view ids, and hands the list over as paths relative to the data
+directory for the server's admin to remove by hand. There is deliberately no
+route that deletes a blob: a session cookie alone must not be able to erase
+the archive, and the admin already holds the disk. An import that is still
+running has uploaded blobs no segment references yet, so the admin removes
+files only while nothing runs on any device.
 
 ## Reading, cache and search
 
@@ -432,7 +457,7 @@ HEAD   /api/blobs/<id>                existence check
 GET    /api/blobs/<id>
 PUT    /api/blobs/<id>                write-once; 409 if the id exists
 POST   /api/blobs/exists              batch existence check, list of ids
-GET    /api/blobs                     listing, for garbage collection
+GET    /api/blobs                     listing, for the unreferenced check; nothing deletes
 ```
 
 - **Setup.** While the server has no credentials, health reports it and the
@@ -507,4 +532,4 @@ generations.
 - Multiple users or archives
 - User-defined labels and notes
 - Attachment content extraction (PDF text, etc.)
-- Garbage collection of orphaned blobs
+- Deleting blobs through the API; unreferenced ones are listed for the admin

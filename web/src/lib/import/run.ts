@@ -11,12 +11,10 @@ import type { Subkeys } from '$lib/crypto/keys';
 import type { SegmentRef } from '$lib/crypto/manifest';
 import { defaultDeps, type Api } from '$lib/account/deps';
 import { call, LockedError } from '$lib/account/errors';
-import { commitSegment } from '$lib/account/segments';
+import { commitSegment, uploadSegment, type SegmentBatch } from '$lib/account/segments';
 import { ApiError } from '$lib/api/types';
-import { encodeSegmentIndex, encodeShard, groupShards } from '$lib/index/segment';
 import { headerKey, type IndexRecord } from '$lib/index/records';
 import { Threader } from '$lib/mail/thread';
-import type { Term } from '$lib/mail/tokenize';
 import { index } from '$lib/state/index.svelte';
 import { importState } from '$lib/state/import.svelte';
 import { session } from '$lib/state/session.svelte';
@@ -48,11 +46,6 @@ export interface RunDeps {
 	signal: AbortSignal;
 }
 
-interface Batch {
-	records: IndexRecord[];
-	terms: { id: string; terms: Term[] }[];
-}
-
 export async function runImport(
 	files: ImportFile[],
 	label: string,
@@ -66,7 +59,7 @@ export async function runImport(
 	signal.addEventListener('abort', () => parser.close(), { once: true });
 	const ticker = setInterval(() => (importState.now = Date.now()), 1000);
 
-	let batch: Batch = { records: [], terms: [] };
+	let batch: SegmentBatch = { records: [], terms: [] };
 	const segments: SegmentRef[] = [];
 	// Ids and header keys taken by this run, so two copies of a message in
 	// one folder do not both get uploaded before either reaches the index.
@@ -203,40 +196,17 @@ async function writeSegment(
 	keys: Subkeys,
 	api: Api,
 	cache: BlobCache,
-	{ records, terms: termsOf }: Batch
+	batch: SegmentBatch
 ): Promise<SegmentRef> {
-	const indexBlob = await encodeSegmentIndex(keys, records);
-	const shards = groupShards(indexBlob.id, keys, termsOf);
-	const shardIds = [...shards.keys()];
-	const pending = [...shards.entries()];
-	importState.writing = { done: 0, total: pending.length + 1 };
-	const upload = async (): Promise<void> => {
-		for (let entry = pending.shift(); entry !== undefined; entry = pending.shift()) {
-			const sealed = await encodeShard(keys, entry[0], entry[1]);
-			await call(api.putBlob(entry[0], sealed.sealed));
-			await cache.put(entry[0], sealed.sealed);
-			importState.writing = {
-				done: importState.writing.done + 1,
-				total: importState.writing.total
-			};
-		}
-	};
-	await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pending.length) }, upload));
-	await call(api.putBlob(indexBlob.id, indexBlob.sealed));
-	await cache.put(indexBlob.id, indexBlob.sealed);
-	const segment: SegmentRef = {
-		id: indexBlob.id,
-		createdAt: new Date().toISOString(),
-		messages: records.length,
-		shards: shardIds
-	};
+	const { segment, shards } = await uploadSegment(keys, { api, cache }, batch, (done, total) => {
+		importState.writing = { done, total };
+	});
 	await commitSegment(segment, { api });
 	// The commit checked the session after its write; the same holds here
 	// for the index, which a lock has emptied.
 	if (session.keys !== keys) throw new LockedError();
-	index.add(segment.id, records);
-	terms.add(segment.id, [...shards.values()]);
-	importState.writing = { done: importState.writing.total, total: importState.writing.total };
+	index.add(segment.id, batch.records);
+	terms.add(segment.id, shards);
 	return segment;
 }
 

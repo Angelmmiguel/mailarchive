@@ -15,7 +15,9 @@ import {
 	MissingSegmentError,
 	MissingShardError,
 	openIndex,
-	openTerms
+	openTerms,
+	replaceSegments,
+	uploadSegment
 } from './segments';
 
 let api: MockApi;
@@ -306,5 +308,94 @@ describe('commitSegment after a lock', () => {
 
 		await expect(commitSegment(segment, { api })).rejects.toThrow(LockedError);
 		expect(session.manifest).toBeNull();
+	});
+});
+
+describe('replaceSegments', () => {
+	const old: SegmentRef = { id: 'a'.repeat(64), createdAt: 't', messages: 2, shards: ['s'] };
+	const fresh: SegmentRef = { id: 'd'.repeat(64), createdAt: 't', messages: 2, shards: ['u'] };
+
+	it('swaps the retired segments for the fresh ones under the ETag', async () => {
+		const kept: SegmentRef = { id: 'e'.repeat(64), createdAt: 't', messages: 1, shards: [] };
+		unlockWith([old, kept]);
+		api.putManifest.mockResolvedValue({ etag: '"v2"' });
+
+		await replaceSegments(new Set([old.id]), [fresh], { api });
+
+		const [data, ifMatch] = api.putManifest.mock.calls[0]!;
+		expect(ifMatch).toBe('"v1"');
+		expect(decodeManifestBody(data, deriveSubkeys(account.dek).manifest).segments).toEqual([
+			kept,
+			fresh
+		]);
+		expect(session.manifest?.body.segments).toEqual([kept, fresh]);
+	});
+
+	it('keeps a segment another device appended meanwhile', async () => {
+		unlockWith([old]);
+		const theirs: SegmentRef = { id: 'b'.repeat(64), createdAt: 't', messages: 1, shards: [] };
+		const keys = deriveSubkeys(account.dek);
+		api.putManifest
+			.mockRejectedValueOnce(new ApiError(412, 'conflict'))
+			.mockResolvedValueOnce({ etag: '"v3"' });
+		api.getManifest.mockResolvedValue({
+			data: encodeManifest(
+				{ header: account.header, body: { ...account.body, segments: [old, theirs] } },
+				keys.manifest
+			),
+			etag: '"v2"'
+		});
+
+		await replaceSegments(new Set([old.id]), [fresh], { api });
+
+		const [data, ifMatch] = api.putManifest.mock.calls[1]!;
+		expect(ifMatch).toBe('"v2"');
+		expect(decodeManifestBody(data, keys.manifest).segments).toEqual([theirs, fresh]);
+	});
+
+	it('leaves nothing of a write made during a lock in the session', async () => {
+		unlockWith([old]);
+		api.putManifest.mockImplementation(() => {
+			session.lock();
+			return Promise.resolve({ etag: '"v2"' });
+		});
+
+		await expect(replaceSegments(new Set([old.id]), [fresh], { api })).rejects.toThrow(LockedError);
+		expect(session.manifest).toBeNull();
+	});
+});
+
+describe('uploadSegment', () => {
+	it('uploads the shards and the index, caches both and reports progress', async () => {
+		unlockWith([]);
+		const keys = deriveSubkeys(account.dek);
+		const stored = new Map<string, Bytes>();
+		api.putBlob.mockImplementation((id, data) => {
+			stored.set(id, data);
+			return Promise.resolve('created');
+		});
+		const progress: [number, number][] = [];
+
+		const { segment, shards } = await uploadSegment(
+			keys,
+			{ api, cache },
+			{
+				records: [record('a'), record('b')],
+				terms: [
+					{ id: 'a', terms: [{ term: 'apple', field: 0, frequency: 1 }] },
+					{ id: 'b', terms: [{ term: 'banana', field: 0, frequency: 1 }] }
+				]
+			},
+			(done, total) => progress.push([done, total])
+		);
+
+		expect(segment.messages).toBe(2);
+		expect(segment.shards).toHaveLength(2);
+		expect(shards).toHaveLength(2);
+		expect([...stored.keys()].sort()).toEqual([segment.id, ...segment.shards].sort());
+		expect(await cache.get(segment.id)).toEqual(stored.get(segment.id));
+		expect(progress[0]).toEqual([0, 3]);
+		expect(progress.at(-1)).toEqual([3, 3]);
+		expect(api.putManifest).not.toHaveBeenCalled();
 	});
 });

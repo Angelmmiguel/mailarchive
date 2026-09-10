@@ -9,7 +9,16 @@ import { ApiError, type Bytes } from '$lib/api/types';
 import { SealError } from '$lib/crypto/aead';
 import type { Subkeys } from '$lib/crypto/keys';
 import { encodeManifest, type ManifestBody, type SegmentRef } from '$lib/crypto/manifest';
-import { decodeSegmentIndex, decodeShard, IndexFormatError } from '$lib/index/segment';
+import {
+	decodeSegmentIndex,
+	decodeShard,
+	encodeSegmentIndex,
+	encodeShard,
+	groupShards,
+	IndexFormatError
+} from '$lib/index/segment';
+import type { IndexRecord, TermShard } from '$lib/index/records';
+import type { Term } from '$lib/mail/tokenize';
 import { index } from '$lib/state/index.svelte';
 import { session } from '$lib/state/session.svelte';
 import { terms } from '$lib/state/terms.svelte';
@@ -179,14 +188,30 @@ export async function commitSegment(
 	segment: SegmentRef,
 	deps: Pick<Deps, 'api'> = defaultDeps
 ): Promise<void> {
+	await writeManifest(
+		(segments) => (segments.some((s) => s.id === segment.id) ? null : [...segments, segment]),
+		deps
+	);
+}
+
+/**
+ * Writes the manifest with its segment list changed by `change`, which
+ * answers null when there is nothing left to write, retrying on a fresh
+ * copy after a conflict.
+ */
+async function writeManifest(
+	change: (segments: SegmentRef[]) => SegmentRef[] | null,
+	deps: Pick<Deps, 'api'>
+): Promise<void> {
 	for (let attempt = 0; ; attempt++) {
 		const keys = session.keys;
 		if (session.status !== 'unlocked' || keys === null || session.manifest === null) {
 			throw new LockedError();
 		}
 		const current = session.manifest;
-		if (current.body.segments.some((s) => s.id === segment.id)) return;
-		const body: ManifestBody = { ...current.body, segments: [...current.body.segments, segment] };
+		const segments = change(current.body.segments);
+		if (segments === null) return;
+		const body: ManifestBody = { ...current.body, segments };
 		try {
 			const data = encodeManifest({ header: current.header, body }, keys.manifest);
 			const { etag } = await call(deps.api.putManifest(data, current.etag));
@@ -204,4 +229,74 @@ export async function commitSegment(
 			session.manifest = openManifest(dek, await requireManifest(deps.api));
 		}
 	}
+}
+
+/** What one segment is built from. */
+export interface SegmentBatch {
+	records: IndexRecord[];
+	terms: { id: string; terms: Term[] }[];
+}
+
+/** Blob uploads of a segment done so far, the index included. */
+export type SegmentProgress = (done: number, total: number) => void;
+
+/** Shards uploaded at once. */
+export const UPLOAD_CONCURRENCY = 3;
+
+/**
+ * Encrypts and uploads the index and term shards of one segment, into the
+ * cache as well, and returns the reference the manifest needs. The
+ * manifest is not touched: the caller commits or replaces.
+ */
+export async function uploadSegment(
+	keys: Subkeys,
+	{ api, cache }: LoadDeps,
+	{ records, terms: termsOf }: SegmentBatch,
+	progress: SegmentProgress = () => {}
+): Promise<{ segment: SegmentRef; shards: TermShard[] }> {
+	const indexBlob = await encodeSegmentIndex(keys, records);
+	const shards = groupShards(indexBlob.id, keys, termsOf);
+	const pending = [...shards.entries()];
+	const total = pending.length + 1;
+	let done = 0;
+	progress(done, total);
+	const upload = async (): Promise<void> => {
+		for (let entry = pending.shift(); entry !== undefined; entry = pending.shift()) {
+			const sealed = await encodeShard(keys, entry[0], entry[1]);
+			await call(api.putBlob(entry[0], sealed.sealed));
+			await cache.put(entry[0], sealed.sealed);
+			progress(++done, total);
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, pending.length) }, upload));
+	await call(api.putBlob(indexBlob.id, indexBlob.sealed));
+	await cache.put(indexBlob.id, indexBlob.sealed);
+	progress(total, total);
+	return {
+		segment: {
+			id: indexBlob.id,
+			createdAt: new Date().toISOString(),
+			messages: records.length,
+			shards: [...shards.keys()]
+		},
+		shards: [...shards.values()]
+	};
+}
+
+/**
+ * Replaces the segments a rebuild retired with the ones it wrote, under
+ * the manifest's ETag. A conflict means another device wrote first: the
+ * manifest is fetched again and the write retried on it, so a segment
+ * appended meanwhile stays, and the retired ones go whichever manifest
+ * they are found in.
+ */
+export async function replaceSegments(
+	retired: ReadonlySet<string>,
+	fresh: SegmentRef[],
+	deps: Pick<Deps, 'api'> = defaultDeps
+): Promise<void> {
+	await writeManifest(
+		(segments) => [...segments.filter((s) => !retired.has(s.id)), ...fresh],
+		deps
+	);
 }

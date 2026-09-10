@@ -164,6 +164,51 @@ test('the export writes every message back as the file it came from', async () =
 	}
 });
 
+test('the rebuild parses every message again and replaces the segment', async () => {
+	const archive = section('Archive');
+	await archive.getByRole('button', { name: 'Rebuild' }).click();
+	await expect(toast()).toContainText('Index rebuilt from 3 messages.');
+	await expect(archive.getByText('3 messages rebuilt')).toBeVisible();
+	await expect(archive.locator('dd')).toHaveText(['3', '2', /KB$/, '1']);
+
+	// The archive reads from the fresh segment: the thread still opens,
+	// with its attachment from the raw blob.
+	await page.getByRole('link', { name: 'ARCHIVE' }).click();
+	const list = page.getByRole('region', { name: 'Threads' });
+	await expect(list.getByRole('link')).toHaveCount(2);
+	await list.getByRole('link').nth(1).click();
+	const reader = page.getByRole('article', { name: /report is ready/ });
+	await expect(reader.getByText('2 messages')).toBeVisible();
+	await expect(reader.getByRole('button', { name: /charging-summary-august\.pdf/ })).toBeVisible();
+	await toolbar().getByRole('button', { name: 'Settings' }).click();
+});
+
+test('the unreferenced check lists a blob nothing points to, for the admin to remove', async () => {
+	// The rebuild reproduced the segment byte for byte, so it retired
+	// nothing; a stray upload stands in for what a crashed import leaves.
+	const stray = '5'.repeat(64);
+	const status = await page.evaluate(
+		(id) =>
+			fetch(`/api/blobs/${id}`, { method: 'PUT', body: new Uint8Array([1, 2, 3]) }).then(
+				(r) => r.status
+			),
+		stray
+	);
+	expect(status).toBe(201);
+
+	const archive = section('Archive');
+	await archive.getByRole('button', { name: 'Check' }).click();
+	await expect(
+		archive.getByText(/^1 blob · paths are relative to the data directory/)
+	).toBeVisible();
+
+	const download = page.waitForEvent('download');
+	await archive.getByRole('button', { name: 'Download list' }).click();
+	const file = await download;
+	expect(file.suggestedFilename()).toBe('unreferenced.txt');
+	expect(await readFile((await file.path())!, 'utf8')).toBe(`blobs/55/${stray}\n`);
+});
+
 test('own addresses are saved to the manifest and survive a reload', async () => {
 	const addresses = section('Own addresses');
 	await expect(addresses.getByRole('button', { name: 'Save' })).toBeDisabled();

@@ -18,11 +18,19 @@
 		WrongPassphraseError
 	} from '$lib/account/errors';
 	import { exportArchive } from '$lib/account/export';
+	import { RebuildBlockedError, rebuildIndex } from '$lib/account/rebuild';
 	import { changePassphrase, regenerateRecoveryKey } from '$lib/account/rotate';
 	import { saveSettings } from '$lib/account/settings';
 	import { checkForSegments } from '$lib/account/sync';
+	import {
+		findUnreferenced,
+		IndexIncompleteError,
+		unreferencedListing
+	} from '$lib/account/unreferenced';
+	import { saveFile } from '$lib/app/files';
 	import { count, fileSize } from '$lib/app/format';
 	import { isLeaving, leave, lockArchive } from '$lib/app/lock';
+	import { workerParser } from '$lib/import/parser';
 	import { unlockUrl } from '$lib/app/navigation';
 	import { blobCache } from '$lib/cache/blobs';
 	import {
@@ -44,6 +52,7 @@
 	import { importState } from '$lib/state/import.svelte';
 	import { index } from '$lib/state/index.svelte';
 	import { onboarding } from '$lib/state/onboarding.svelte';
+	import { rebuildState } from '$lib/state/rebuild.svelte';
 	import { session } from '$lib/state/session.svelte';
 	import { theme } from '$lib/state/theme.svelte';
 	import { toasts } from '$lib/state/toasts.svelte';
@@ -79,16 +88,24 @@
 	});
 
 	let working = $state<
-		'addresses' | 'passphrase' | 'recovery' | 'export' | 'cache' | 'lock' | null
+		| 'addresses'
+		| 'passphrase'
+		| 'recovery'
+		| 'export'
+		| 'rebuild'
+		| 'unreferenced'
+		| 'cache'
+		| 'lock'
+		| null
 	>(null);
 	let refused = $state<string | null>(null);
 	let problem = $state<{ where: string; text: string } | null>(null);
 
-	// Measured on arrival and again when an import, which writes to the
-	// cache, has finished.
+	// Measured on arrival and again when an import or a rebuild, which
+	// write to the cache, has finished.
 	let cached = $state<number | null | undefined>(undefined);
 	$effect(() => {
-		if (!importState.active) void measure();
+		if (!importState.active && !rebuildState.active) void measure();
 	});
 
 	async function measure(): Promise<void> {
@@ -137,6 +154,11 @@
 				refused = 'Wrong passphrase';
 			} else if (e instanceof RateLimitedError) {
 				refused = 'Too many attempts. Wait a minute, then try again.';
+			} else if (e instanceof RebuildBlockedError || e instanceof IndexIncompleteError) {
+				problem = {
+					where,
+					text: `Not now: ${e.message.replace(/^cannot rebuild the index: /, '')}`
+				};
 			} else if (e instanceof ServerUnreachableError) {
 				problem = { where, text: 'The server cannot be reached — try again' };
 			} else if (e instanceof ApiError && e.code === 'conflict') {
@@ -235,6 +257,75 @@
 		} finally {
 			exporting = null;
 		}
+	}
+
+	// A rebuild parses every original again with the code as it is now and
+	// replaces the segments; an import at the same time would write into
+	// the list being replaced, so the row waits for it.
+	let rebuilding = $state<AbortController | null>(null);
+	const rebuildDetail = $derived.by(() => {
+		if (importState.active) return 'waits for the import to finish';
+		if (rebuildState.status === 'committing') {
+			return rebuildState.writing === null
+				? 'writing the manifest'
+				: `writing segment, ${rebuildState.writing.done} of ${rebuildState.writing.total} blobs`;
+		}
+		if (rebuildState.active) {
+			return `${rebuildState.done.toLocaleString()} of ${rebuildState.total.toLocaleString()} parsed`;
+		}
+		if (rebuildState.status === 'idle') {
+			return 'parses every message again with the current version · nothing is re-uploaded';
+		}
+		if (rebuildState.status === 'cancelled') return 'stopped · the archive is as it was';
+		if (rebuildState.error !== null) return 'failed · the archive is as it was';
+		const kept =
+			rebuildState.kept === 0 ? '' : `, ${count(rebuildState.kept, 'record')} kept as before`;
+		return `${count(rebuildState.done - rebuildState.kept, 'message')} rebuilt${kept}`;
+	});
+
+	async function rebuildAll(): Promise<void> {
+		const controller = new AbortController();
+		rebuilding = controller;
+		try {
+			await run('rebuild', async () => {
+				const summary = await rebuildIndex({ parser: workerParser(), signal: controller.signal });
+				unreferenced = null;
+				if (!summary.cancelled) {
+					toasts.push({
+						tone: summary.kept === 0 ? 'ok' : 'accent',
+						label: 'rebuilt',
+						message: `Index rebuilt from ${count(summary.rebuilt, 'message')}.`
+					});
+				}
+			});
+		} finally {
+			rebuilding = null;
+		}
+	}
+
+	// What the server stores that nothing points to. Nothing here deletes:
+	// the server has no such route, so the admin removes the listed files.
+	let unreferenced = $state<string[] | null>(null);
+	const unreferencedDetail = $derived.by(() => {
+		if (unreferenced === null)
+			return "blobs the archive no longer points to, for the server's admin to remove";
+		if (unreferenced.length === 0) return 'nothing to remove';
+		return `${count(unreferenced.length, 'blob')} · paths are relative to the data directory · remove them only while no import runs anywhere`;
+	});
+
+	function checkUnreferenced(): Promise<void> {
+		return run('unreferenced', async () => {
+			unreferenced = await findUnreferenced();
+		});
+	}
+
+	function downloadUnreferenced(): void {
+		if (unreferenced === null) return;
+		saveFile(
+			'unreferenced.txt',
+			new TextEncoder().encode(unreferencedListing(unreferenced)),
+			'text/plain'
+		);
 	}
 
 	function clearCache(): Promise<void> {
@@ -365,6 +456,47 @@
 					{/if}
 				{/snippet}
 				{#if problem?.where === 'export'}<Notice>{problem.text}</Notice>{/if}
+			</SettingRow>
+			<SettingRow title="Rebuild index" detail={rebuildDetail} open={problem?.where === 'rebuild'}>
+				{#snippet action()}
+					{#if rebuilding !== null}
+						<Button variant="secondary" size="sm" onclick={() => rebuilding?.abort()}>Stop</Button>
+					{:else}
+						<Button
+							variant="secondary"
+							size="sm"
+							onclick={rebuildAll}
+							disabled={importState.active || index.messages === 0 || working !== null}
+							>Rebuild</Button
+						>
+					{/if}
+				{/snippet}
+				{#if problem?.where === 'rebuild'}<Notice>{problem.text}</Notice>{/if}
+			</SettingRow>
+			<SettingRow
+				title="Unreferenced data"
+				detail={unreferencedDetail}
+				open={problem?.where === 'unreferenced' ||
+					(unreferenced !== null && unreferenced.length > 0)}
+			>
+				{#snippet action()}
+					<Button
+						variant="secondary"
+						size="sm"
+						onclick={checkUnreferenced}
+						busy={working === 'unreferenced'}
+						disabled={importState.active || rebuildState.active || working !== null}>Check</Button
+					>
+				{/snippet}
+				{#if problem?.where === 'unreferenced'}<Notice>{problem.text}</Notice>{/if}
+				{#if unreferenced !== null && unreferenced.length > 0}
+					<p class="hint">
+						The server keeps these files, but no segment or message points to them. Download the
+						list and remove the paths from the data directory on the server.
+					</p>
+					<Button variant="secondary" size="sm" onclick={downloadUnreferenced}>Download list</Button
+					>
+				{/if}
 			</SettingRow>
 		</SettingsSection>
 
